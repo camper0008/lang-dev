@@ -8,12 +8,14 @@ use indexed_char_iterator::{IndexedChar, IndexedCharIterator};
 
 #[derive(Debug, PartialEq)]
 pub struct Token {
-    index: usize,
-    length: usize,
-    variant: TokenVariant,
-    line: usize,
-    column: usize,
+    pub index: usize,
+    pub length: usize,
+    pub variant: TokenVariant,
+    pub line: usize,
+    pub column: usize,
 }
+
+impl Token {}
 
 #[derive(PartialEq, Debug)]
 pub enum TokenVariant {
