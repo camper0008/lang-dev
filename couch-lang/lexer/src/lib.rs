@@ -1,10 +1,14 @@
 #![allow(dead_code)]
 
+pub mod indexed_char_iterator;
+
 const NO_MUT_PEEK_NEXT_MESSAGE: &str = "should not mutate between peek & next";
 
-const KEYWORDS: &[&str] = &["let", "mut"];
+const KEYWORDS: &[&str] = &["let", "mut", "fn", "return"];
 
 use std::iter::Peekable;
+
+use indexed_char_iterator::{IndexedChar, IndexedCharIterator};
 
 #[derive(Debug, PartialEq)]
 pub struct Token {
@@ -41,10 +45,7 @@ pub enum TokenVariant {
 }
 
 pub struct Lexer<I: Iterator<Item = char>> {
-    iter: Peekable<I>,
-    index: usize,
-    line: usize,
-    column: usize,
+    iter: Peekable<IndexedCharIterator<I>>,
 }
 
 impl<I> Lexer<I>
@@ -53,42 +54,36 @@ where
 {
     pub fn new(iter: I) -> Self {
         Self {
-            iter: iter.peekable(),
-            column: 1,
-            line: 1,
-            index: 0,
-        }
-    }
-
-    fn step(&mut self, new_line: bool, char_length: usize) {
-        self.index += 1;
-        if new_line {
-            self.line += 1;
-            self.column = 1;
-        } else {
-            self.column += char_length;
+            iter: IndexedCharIterator::new(iter).peekable(),
         }
     }
 
     fn make_single_token(&mut self, variant: TokenVariant) -> Token {
-        let value = self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
+        let IndexedChar {
+            line,
+            column,
+            index,
+            value,
+        } = self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
+
         let token = Token {
-            index: self.index,
             length: value.len_utf8(),
+            index,
             variant,
-            line: self.line,
-            column: self.column,
+            line,
+            column,
         };
-        let is_newline = value == '\n';
-        self.step(is_newline, value.len_utf8());
         token
     }
 
     fn make_keyword_or_identifier(&mut self) -> Token {
-        let index = self.index;
-        let column = self.column;
-        let line = self.line;
-        let mut text = String::new();
+        let IndexedChar {
+            index,
+            line,
+            column,
+            value,
+        } = self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
+        let mut text = String::from(value);
 
         let make_token = |text: String| {
             let variant = if KEYWORDS.contains(&text.as_str()) {
@@ -106,14 +101,14 @@ where
         };
 
         loop {
-            let Some(char) = self.iter.peek() else {
+            let Some(IndexedChar { value, .. }) = self.iter.peek() else {
                 break make_token(text)
             };
-            match char {
+            match value {
                 '0'..='9' | 'a'..='z' | 'A'..='Z' | '_' => {
-                    self.step(false, 1);
-                    let char = self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
-                    text.push(char);
+                    let IndexedChar { value, .. } =
+                        self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
+                    text.push(value);
                 }
                 _ => break make_token(text),
             };
@@ -123,41 +118,28 @@ where
     fn make_comment_or_slash(&mut self) -> Option<Token> {
         self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
         match self.iter.peek() {
-            Some('*') => {
-                self.step(false, 1);
+            Some(IndexedChar { value: '*', .. }) => {
                 self.iter.next();
                 loop {
-                    let next = self.iter.peek();
-                    if let Some('*') = next {
-                        self.step(false, 1);
+                    let next = self.iter.peek()?;
+                    if next.value == '*' {
                         self.iter.next();
-                        let next = self.iter.peek();
-                        if let Some('/') = next {
+                        let next = self.iter.peek()?;
+                        if next.value == '/' {
                             self.iter.next();
-                            self.step(false, 1);
                             break self.make_token();
                         }
-                    } else if let Some('\n') = next {
-                        self.iter.next();
-                        self.step(true, 1);
-                    } else if let Some(_) = next {
-                        self.iter.next();
-                        self.step(false, 1);
                     } else {
-                        break None;
+                        self.iter.next();
                     }
                 }
             }
-            Some('/') => loop {
-                let next = self.iter.peek();
-                if let Some('\n') = next {
-                    self.step(false, 1);
+            Some(IndexedChar { value: '/', .. }) => loop {
+                let next = self.iter.peek()?;
+                if next.value == '\n' {
                     break Some(self.make_single_token(TokenVariant::Whitespace));
-                } else if let Some(_) = next {
-                    self.step(false, 1);
-                    self.iter.next();
                 } else {
-                    break None;
+                    self.iter.next();
                 }
             },
             Some(_) | None => Some(self.make_single_token(TokenVariant::Slash)),
@@ -170,14 +152,16 @@ where
         second_char: char,
         second_variant: TokenVariant,
     ) -> Token {
-        let index = self.index;
-        let column = self.column;
-        let line = self.line;
+        let IndexedChar {
+            index,
+            line,
+            column,
+            ..
+        } = self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
 
-        let single_token = self.make_single_token(single_variant);
         match self.iter.peek() {
-            Some(char) if *char == second_char => {
-                self.step(false, 1);
+            Some(IndexedChar { value, .. }) if *value == second_char => {
+                self.iter.next();
                 Token {
                     index,
                     column,
@@ -186,15 +170,24 @@ where
                     variant: second_variant,
                 }
             }
-            Some(_) | None => single_token,
+            Some(_) | None => Token {
+                index,
+                column,
+                line,
+                length: 2,
+                variant: single_variant,
+            },
         }
     }
 
     fn make_number(&mut self) -> Token {
-        let index = self.index;
-        let column = self.column;
-        let line = self.line;
-        let mut length = 0;
+        let IndexedChar {
+            index,
+            line,
+            column,
+            ..
+        } = self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
+        let mut length = 1;
         let mut dot_has_appeared = false;
 
         loop {
@@ -212,14 +205,12 @@ where
                     column,
                 };
             };
-            match char {
+            match char.value {
                 '0'..='9' => {
-                    self.step(false, 1);
                     self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
                     length += 1;
                 }
                 '.' if dot_has_appeared => {
-                    self.step(false, 1);
                     self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
                     length += 1;
                     break Token {
@@ -231,7 +222,6 @@ where
                     };
                 }
                 '.' => {
-                    self.step(false, 1);
                     self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
                     length += 1;
                     dot_has_appeared = true;
@@ -259,7 +249,7 @@ where
             return None;
         };
 
-        let token = match char {
+        let token = match char.value {
             '0'..='9' => self.make_number(),
             ' ' => self.make_single_token(TokenVariant::Whitespace),
             '\n' => self.make_single_token(TokenVariant::Whitespace),
@@ -476,7 +466,7 @@ let b = function_name();"#,
                 factory.make(" ", TokenVariant::Whitespace),
                 factory.make("return", TokenVariant::Keyword),
                 factory.make(" ", TokenVariant::Whitespace),
-                factory.make("a", TokenVariant::Whitespace),
+                factory.make("a", TokenVariant::Identifier),
                 factory.make(";", TokenVariant::Semicolon),
                 factory.make("\n", TokenVariant::Whitespace),
                 factory.make("}", TokenVariant::RBrace),
