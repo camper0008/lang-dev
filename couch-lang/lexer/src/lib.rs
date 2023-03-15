@@ -20,6 +20,8 @@ pub enum TokenVariant {
     Whitespace,
     Keyword,
     Identifier,
+    LParenthesis,
+    RParenthesis,
     LBrace,
     RBrace,
     Equal,
@@ -118,6 +120,76 @@ where
         }
     }
 
+    fn make_comment_or_slash(&mut self) -> Option<Token> {
+        self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
+        match self.iter.peek() {
+            Some('*') => {
+                self.step(false, 1);
+                self.iter.next();
+                loop {
+                    let next = self.iter.peek();
+                    if let Some('*') = next {
+                        self.step(false, 1);
+                        self.iter.next();
+                        let next = self.iter.peek();
+                        if let Some('/') = next {
+                            self.iter.next();
+                            self.step(false, 1);
+                            break self.make_token();
+                        }
+                    } else if let Some('\n') = next {
+                        self.iter.next();
+                        self.step(true, 1);
+                    } else if let Some(_) = next {
+                        self.iter.next();
+                        self.step(false, 1);
+                    } else {
+                        break None;
+                    }
+                }
+            }
+            Some('/') => loop {
+                let next = self.iter.peek();
+                if let Some('\n') = next {
+                    self.step(false, 1);
+                    break Some(self.make_single_token(TokenVariant::Whitespace));
+                } else if let Some(_) = next {
+                    self.step(false, 1);
+                    self.iter.next();
+                } else {
+                    break None;
+                }
+            },
+            Some(_) | None => Some(self.make_single_token(TokenVariant::Slash)),
+        }
+    }
+
+    fn make_single_or_double_token(
+        &mut self,
+        single_variant: TokenVariant,
+        second_char: char,
+        second_variant: TokenVariant,
+    ) -> Token {
+        let index = self.index;
+        let column = self.column;
+        let line = self.line;
+
+        let single_token = self.make_single_token(single_variant);
+        match self.iter.peek() {
+            Some(char) if *char == second_char => {
+                self.step(false, 1);
+                Token {
+                    index,
+                    column,
+                    line,
+                    length: 2,
+                    variant: second_variant,
+                }
+            }
+            Some(_) | None => single_token,
+        }
+    }
+
     fn make_number(&mut self) -> Token {
         let index = self.index;
         let column = self.column;
@@ -181,15 +253,8 @@ where
             };
         }
     }
-}
 
-impl<I> Iterator for Lexer<I>
-where
-    I: Iterator<Item = char>,
-{
-    type Item = Token;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn make_token(&mut self) -> Option<Token> {
         let Some(char) = self.iter.peek() else {
             return None;
         };
@@ -200,10 +265,51 @@ where
             '\n' => self.make_single_token(TokenVariant::Whitespace),
             '=' => self.make_single_token(TokenVariant::Equal),
             ';' => self.make_single_token(TokenVariant::Semicolon),
+            '(' => self.make_single_token(TokenVariant::LParenthesis),
+            ')' => self.make_single_token(TokenVariant::RParenthesis),
+            '{' => self.make_single_token(TokenVariant::LBrace),
+            '}' => self.make_single_token(TokenVariant::RBrace),
+            '+' => {
+                self.make_single_or_double_token(TokenVariant::Plus, '=', TokenVariant::PlusEqual)
+            }
             'a'..='z' | 'A'..='Z' | '_' => self.make_keyword_or_identifier(),
+            '/' => match self.make_comment_or_slash() {
+                Some(token) => token,
+                None => return None,
+            },
             c => panic!("unrecognized character {c}"),
         };
         Some(token)
+    }
+}
+
+pub struct LexerIterator<I>
+where
+    I: Iterator<Item = char>,
+{
+    lexer: Lexer<I>,
+}
+
+impl<I> Iterator for LexerIterator<I>
+where
+    I: Iterator<Item = char>,
+{
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.lexer.make_token()
+    }
+}
+
+impl<I> IntoIterator for Lexer<I>
+where
+    I: Iterator<Item = char>,
+{
+    type Item = Token;
+    type IntoIter = LexerIterator<I>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        LexerIterator { lexer: self }
     }
 }
 
@@ -224,6 +330,12 @@ mod tests {
                 column: 1,
                 line: 1,
                 index: 0,
+            }
+        }
+
+        pub fn skip(&mut self, text: &str) {
+            for c in text.chars() {
+                self.make(&c.to_string(), TokenVariant::Whitespace);
             }
         }
 
@@ -253,7 +365,7 @@ mod tests {
         let mut factory = TokenFactory::new();
 
         assert_eq!(
-            lexer.collect::<Vec<Token>>(),
+            lexer.into_iter().collect::<Vec<Token>>(),
             vec![
                 factory.make("500", TokenVariant::Integer),
                 factory.make(" ", TokenVariant::Whitespace),
@@ -272,7 +384,7 @@ mod tests {
         let mut factory = TokenFactory::new();
 
         assert_eq!(
-            lexer.collect::<Vec<Token>>(),
+            lexer.into_iter().collect::<Vec<Token>>(),
             vec![
                 factory.make("let", TokenVariant::Keyword),
                 factory.make(" ", TokenVariant::Whitespace),
@@ -297,24 +409,90 @@ mod tests {
         );
     }
 
-    /*
     #[test]
     fn example_one() {
         let input = String::from(
             r#"// comment
-    /* multiline
-    comment */
-    fn function_name() {
-    let a = 5;
-    let mut b = 3;
-    b += a;
-    return b;
+/* multiline
+comment */
+fn function_name() {
+    let mut a = 3;
+    a += 5;
+    return a;
 }
 
-let c = function_name(); // c += 1; // ERR: mutating a non-mutable variable
-    let mut c = 8; // c += 0.5; // ERR: combining an integer with a non-float"#,
-    );
-    let _lexer = Lexer::new(input.chars());
-}
-*/
+let b = function_name();"#,
+        );
+
+        let lexer = Lexer::new(input.chars());
+        let mut factory = TokenFactory::new();
+
+        factory.skip("// comment");
+        let newline_token = factory.make("\n", TokenVariant::Whitespace);
+        factory.skip("/* multiline\ncomment */");
+
+        assert_eq!(
+            lexer.into_iter().collect::<Vec<Token>>(),
+            vec![
+                newline_token,
+                factory.make("\n", TokenVariant::Whitespace),
+                factory.make("fn", TokenVariant::Keyword),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("function_name", TokenVariant::Identifier),
+                factory.make("(", TokenVariant::LParenthesis),
+                factory.make(")", TokenVariant::RParenthesis),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("{", TokenVariant::LBrace),
+                factory.make("\n", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("let", TokenVariant::Keyword),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("mut", TokenVariant::Keyword),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("a", TokenVariant::Identifier),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("=", TokenVariant::Equal),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("5", TokenVariant::Integer),
+                factory.make(";", TokenVariant::Semicolon),
+                factory.make("\n", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("a", TokenVariant::Identifier),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("+=", TokenVariant::PlusEqual),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("5", TokenVariant::Integer),
+                factory.make(";", TokenVariant::Semicolon),
+                factory.make("\n", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("return", TokenVariant::Keyword),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("a", TokenVariant::Whitespace),
+                factory.make(";", TokenVariant::Semicolon),
+                factory.make("\n", TokenVariant::Whitespace),
+                factory.make("}", TokenVariant::RBrace),
+                factory.make("\n", TokenVariant::Whitespace),
+                factory.make("\n", TokenVariant::Whitespace),
+                factory.make("let", TokenVariant::Keyword),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("b", TokenVariant::Identifier),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("=", TokenVariant::Equal),
+                factory.make(" ", TokenVariant::Whitespace),
+                factory.make("function_name", TokenVariant::Identifier),
+                factory.make("(", TokenVariant::LParenthesis),
+                factory.make(")", TokenVariant::RParenthesis),
+                factory.make(";", TokenVariant::Semicolon),
+            ]
+        );
+    }
 }
