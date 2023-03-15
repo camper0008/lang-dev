@@ -63,14 +63,13 @@ where
             value,
         } = self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
 
-        let token = Token {
+        Token {
             length: value.len_utf8(),
             index,
             variant,
             line,
             column,
-        };
-        token
+        }
     }
 
     fn make_keyword_or_identifier(&mut self) -> Token {
@@ -137,9 +136,8 @@ where
                 let next = self.iter.peek()?;
                 if next.value == '\n' {
                     break self.make_token();
-                } else {
-                    self.iter.next();
                 }
+                self.iter.next();
             },
             Some(_) | None => Some(self.make_single_or_double_token(
                 TokenVariant::Slash,
@@ -201,9 +199,9 @@ where
                     TokenVariant::Integer
                 };
                 return Token {
-                    variant,
                     index,
                     length,
+                    variant,
                     line,
                     column,
                 };
@@ -236,9 +234,9 @@ where
                         TokenVariant::Integer
                     };
                     break Token {
-                        variant,
                         index,
                         length,
+                        variant,
                         line,
                         column,
                     };

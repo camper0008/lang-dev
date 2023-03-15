@@ -47,6 +47,6 @@ where
         } else {
             self.column += 1;
         };
-        return Some(indexed_char);
+        Some(indexed_char)
     }
 }
