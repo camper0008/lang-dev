@@ -3,8 +3,23 @@ use std::iter::Peekable;
 use couch_lang_lexer::{Token, TokenVariant};
 
 #[derive(Debug, PartialEq)]
+pub enum Statement {
+    Let {
+        mutable: bool,
+        identifier: Box<Node<Expression>>,
+        value: Box<Node<Expression>>,
+    },
+    Return(Option<Box<Node<Expression>>>),
+}
+
+pub struct Parameter {
+    mutable: bool,
+    identifier: Box<Node<Expression>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
-    Int(i64),
+    Integer(i64),
     Float(f64),
     Call {
         subject: Box<Node<Expression>>,
@@ -25,25 +40,15 @@ pub enum Expression {
         right: Box<Node<Expression>>,
         variant: AssignmentVariant,
     },
-    Parameter {
-        mutable: bool,
-        identifier: Box<Node<Expression>>,
-    },
-    Return(Option<Box<Node<Expression>>>),
-    Let {
-        mutable: bool,
-        identifier: Box<Node<Expression>>,
-        value: Box<Node<Expression>>,
-    },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum UnaryVariant {
     NegateNumber,
     NegateBool,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum BinaryVariant {
     Addition,
     Subtraction,
@@ -53,7 +58,7 @@ pub enum BinaryVariant {
     NotEqual,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum AssignmentVariant {
     Base,
     Addition,
@@ -62,13 +67,13 @@ pub enum AssignmentVariant {
     Division,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Node<T> {
     pub value: T,
     pub position: Position,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Position {
     pub index: usize,
     pub line: usize,
@@ -97,7 +102,13 @@ impl<I> Parser<I>
 where
     I: Iterator<Item = Token>,
 {
-    pub fn parse_statement(&mut self) -> Node<Expression> {
+    pub fn new(iter: I, text: String) -> Self {
+        Self {
+            iter: iter.peekable(),
+            text,
+        }
+    }
+    pub fn parse_statement(&mut self) -> Node<Statement> {
         let Some(keyword) = self.iter.peek() else {
             todo!("EOF handling");
         };
@@ -107,7 +118,7 @@ where
             variant => todo!("unexpected variant {variant:#?}"),
         }
     }
-    pub fn parse_return(&mut self) -> Node<Expression> {
+    pub fn parse_return(&mut self) -> Node<Statement> {
         let keyword = self
             .iter
             .next()
@@ -121,14 +132,14 @@ where
         let token = self.iter.peek().expect("missing semicolon"); // TODO: pretty errors, not
                                                                   // expect
         match token.variant {
-            TokenVariant::Semicolon => Self::node(Expression::Return(None), position),
+            TokenVariant::Semicolon => Self::node(Statement::Return(None), position),
             _ => Self::node(
-                Expression::Return(Some(Box::new(self.parse_expression()))),
+                Statement::Return(Some(Box::new(self.parse_expression()))),
                 position,
             ),
         }
     }
-    pub fn parse_let(&mut self) -> Node<Expression> {
+    pub fn parse_let(&mut self) -> Node<Statement> {
         let keyword = self.iter.peek().expect("called out of order");
         debug_assert_eq!(
             keyword.variant,
@@ -144,15 +155,10 @@ where
 
         self.iter.next();
 
-        let parameter = self.parse_parameter();
-
-        let (mutable, identifier) = match parameter.value {
-            Expression::Parameter {
-                mutable,
-                identifier,
-            } => (mutable, identifier),
-            expression => panic!("expected parameter, got {expression:#?}"),
-        };
+        let Parameter {
+            mutable,
+            identifier,
+        } = self.parse_parameter().value;
 
         // TODO: pretty error, not panic
         let next = self.iter.peek().expect("did not expect EOF");
@@ -181,7 +187,7 @@ where
         self.iter.next();
 
         Self::node(
-            Expression::Let {
+            Statement::Let {
                 mutable,
                 identifier,
                 value: Box::new(value),
@@ -189,7 +195,7 @@ where
             position,
         )
     }
-    pub fn parse_parameter(&mut self) -> Node<Expression> {
+    pub fn parse_parameter(&mut self) -> Node<Parameter> {
         // TODO: pretty error, not expect
         let next = self.iter.peek().expect("did not expect EOF");
         let position = Position {
@@ -207,7 +213,7 @@ where
             panic!("expected identifier, got {:#?}", identifier.value);
         }
         Self::node(
-            Expression::Parameter {
+            Parameter {
                 mutable,
                 identifier: Box::new(identifier),
             },
@@ -342,7 +348,7 @@ where
                 let value = &self.text[token.index..token.index + token.length]
                     .parse::<i64>()
                     .unwrap();
-                return Self::node(Expression::Int(*value), (&token).into());
+                return Self::node(Expression::Integer(*value), (&token).into());
             }
             TokenVariant::Float => {
                 let token = self.iter.next().unwrap();
@@ -382,7 +388,7 @@ mod tests {
                     index: 0,
                     line: 1,
                 },
-                value: Expression::Int(1)
+                value: Expression::Integer(1)
             }
         )
     }
@@ -406,7 +412,7 @@ mod tests {
                 },
                 value: Expression::Unary {
                     subject: Box::new(Node {
-                        value: Expression::Int(1),
+                        value: Expression::Integer(1),
                         position: Position {
                             index: 1,
                             line: 1,
@@ -438,7 +444,7 @@ mod tests {
                 },
                 value: Expression::Binary {
                     left: Box::new(Node {
-                        value: Expression::Int(20),
+                        value: Expression::Integer(20),
                         position: Position {
                             index: 0,
                             line: 1,
@@ -453,7 +459,7 @@ mod tests {
                         },
                         value: Expression::Binary {
                             left: Box::new(Node {
-                                value: Expression::Int(27),
+                                value: Expression::Integer(27),
                                 position: Position {
                                     index: 5,
                                     column: 6,
@@ -511,7 +517,7 @@ mod tests {
                         },
                         value: Expression::Binary {
                             left: Box::new(Node {
-                                value: Expression::Int(20),
+                                value: Expression::Integer(20),
                                 position: Position {
                                     index: 0,
                                     line: 1,
@@ -519,7 +525,7 @@ mod tests {
                                 },
                             }),
                             right: Box::new(Node {
-                                value: Expression::Int(27),
+                                value: Expression::Integer(27),
                                 position: Position {
                                     index: 5,
                                     column: 6,
@@ -552,7 +558,7 @@ mod tests {
                     column: 1,
                     line: 1,
                 },
-                value: Expression::Return(None),
+                value: Statement::Return(None),
             }
         )
     }
@@ -574,7 +580,7 @@ mod tests {
                     column: 1,
                     line: 1,
                 },
-                value: Expression::Return(Some(Box::new(Node {
+                value: Statement::Return(Some(Box::new(Node {
                     value: Expression::Binary {
                         left: Box::new(Node {
                             value: Expression::Identifier("a".to_string()),
@@ -616,7 +622,7 @@ mod tests {
         assert_eq!(
             expression,
             Node {
-                value: Expression::Let {
+                value: Statement::Let {
                     mutable: false,
                     identifier: Box::new(Node {
                         value: Expression::Identifier("a".to_string()),
@@ -656,7 +662,7 @@ mod tests {
         assert_eq!(
             expression,
             Node {
-                value: Expression::Let {
+                value: Statement::Let {
                     mutable: true,
                     identifier: Box::new(Node {
                         value: Expression::Identifier("a".to_string()),
@@ -682,5 +688,42 @@ mod tests {
                 }
             }
         )
+    }
+
+    #[test]
+    fn add_float_and_int() {
+        let input = String::from("2.5 + 4");
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser::new(lexer.into_iter(), input.clone());
+        let expression = parser.parse_expression();
+        assert_eq!(
+            expression,
+            Node {
+                value: Expression::Binary {
+                    left: Box::new(Node {
+                        value: Expression::Float(2.5,),
+                        position: Position {
+                            index: 0,
+                            line: 1,
+                            column: 1,
+                        },
+                    }),
+                    right: Box::new(Node {
+                        value: Expression::Integer(4,),
+                        position: Position {
+                            index: 6,
+                            line: 1,
+                            column: 7,
+                        },
+                    }),
+                    variant: BinaryVariant::Addition,
+                },
+                position: Position {
+                    index: 0,
+                    line: 1,
+                    column: 1
+                }
+            }
+        );
     }
 }
