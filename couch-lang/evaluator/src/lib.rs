@@ -37,21 +37,25 @@ impl Evaluator {
                 value,
             } => {
                 let Expression::Identifier(identifier) = identifier.value else {
-                    todo!("handle error");
+                    return Some(Value::Error { message: format!("expected identifier, got {:#?}", identifier.value), line: identifier.position.line, column: identifier.position.column });
                 };
                 let value = Self::evaluate_expression(*value, outer_context, inner_context);
                 inner_context.insert(identifier, IdentifierType::Value { mutable, value });
                 None
             }
-            Statement::Return(_) => todo!(),
-            Statement::Error(_) => todo!(),
+            Statement::Return(_) => todo!("return statement"),
+            Statement::Error(message) => Some(Value::Error {
+                message,
+                line: node.position.line,
+                column: node.position.column,
+            }),
             Statement::Assignment {
                 left,
                 right,
                 variant,
             } => {
                 let Expression::Identifier(identifier) = left.value else {
-                    todo!("handle error");
+                    return Some(Value::Error { message: format!("expected identifier, got {:#?}", left.value), line: left.position.line, column: left.position.column });
                 };
                 let right = Evaluator::evaluate_expression(*right, outer_context, inner_context);
                 let Some(identifier_ref) = inner_context
@@ -185,10 +189,10 @@ impl Evaluator {
             Expression::Call {
                 subject: _,
                 arguments: _,
-            } => todo!(),
+            } => todo!("evaluate call expressions"),
             Expression::Identifier(q) => match inner_context.get(&q).or(outer_context.get(&q)) {
                 Some(IdentifierType::Value { value, .. }) => value.clone(),
-                Some(IdentifierType::Function { value: _ }) => todo!(),
+                Some(IdentifierType::Function { value: _ }) => todo!("function identifiers"),
                 None => Value::Error {
                     message: format!("identifier {q} is not yet given value"),
                     line: expression.position.line,
