@@ -5,6 +5,13 @@ const NO_MUT_PEEK_NEXT_MESSAGE: &str = "should not mutate between peek & next";
 use std::iter::Peekable;
 
 use indexed_char_iterator::{IndexedChar, IndexedCharIterator};
+use token_variant::TokenVariant;
+
+mod token_variant;
+
+pub struct Lexer<I: Iterator<Item = char>> {
+    iter: Peekable<IndexedCharIterator<I>>,
+}
 
 #[derive(Debug, PartialEq)]
 pub struct Token {
@@ -15,39 +22,16 @@ pub struct Token {
     pub column: usize,
 }
 
-impl Token {}
-
-#[derive(PartialEq, Debug)]
-pub enum TokenVariant {
-    LetKeyword,
-    MutKeyword,
-    FnKeyword,
-    ReturnKeyword,
-    Identifier,
-    LParenthesis,
-    RParenthesis,
-    LBrace,
-    RBrace,
-    Equal,
-    PlusEqual,
-    Plus,
-    MinusEqual,
-    Minus,
-    AsteriskEqual,
-    Asterisk,
-    SlashEqual,
-    Slash,
-    Semicolon,
-    Integer,
-    Float,
-    Error,
-    Exclamation,
-    ExclamationEqual,
-    DoubleEqual,
-}
-
-pub struct Lexer<I: Iterator<Item = char>> {
-    iter: Peekable<IndexedCharIterator<I>>,
+impl Token {
+    pub fn to_fancy_string(&self, input: &str) -> String {
+        format!(
+            "[{}:{}]\t{}({})",
+            self.column,
+            self.line,
+            self.variant,
+            &input[self.index..self.index + self.length]
+        )
+    }
 }
 
 impl<I> Lexer<I>
