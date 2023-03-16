@@ -17,7 +17,7 @@ pub enum Statement {
         right: Box<Node<Expression>>,
         variant: AssignmentVariant,
     },
-    Expression(Expression),
+    Expression(Node<Expression>),
     Error(String),
 }
 
@@ -116,14 +116,22 @@ where
             text,
         }
     }
+    pub fn parse_statements(&mut self) -> Vec<Node<Statement>> {
+        let mut result = Vec::new();
+        while self.iter.peek().is_some() {
+            result.push(self.parse_statement());
+        }
+        result
+    }
     pub fn parse_statement(&mut self) -> Node<Statement> {
         let keyword = try_peek_or_error!(parser: self, error: Statement::Error);
-        match &keyword.variant {
+        let statement = match &keyword.variant {
             TokenVariant::ReturnKeyword => self.parse_return(),
             TokenVariant::LetKeyword => self.parse_let(),
             TokenVariant::FnKeyword => todo!("parse fn"),
             _ => self.parse_assignment(),
-        }
+        };
+        statement
     }
     pub fn parse_return(&mut self) -> Node<Statement> {
         let keyword = self.iter.next().expect("called out of order");
@@ -135,11 +143,22 @@ where
         let position: Position = (&keyword).into();
         let token = try_peek_or_error!(parser: self, expect: Semicolon, error: Statement::Error);
         match token.variant {
-            TokenVariant::Semicolon => Self::node(Statement::Return(None), position),
-            _ => Self::node(
-                Statement::Return(Some(Box::new(self.parse_expression()))),
-                position,
-            ),
+            TokenVariant::Semicolon => {
+                let node = Self::node(Statement::Return(None), position);
+                self.iter.next().expect("peeked");
+                node
+            }
+            _ => {
+                let node = Self::node(
+                    Statement::Return(Some(Box::new(self.parse_expression()))),
+                    position,
+                );
+                let token =
+                    try_peek_or_error!(parser: self, expect: Semicolon, error: Statement::Error);
+                assert_equal_variant!(token == Semicolon, error: Statement::Error);
+                self.iter.next().expect("peeked");
+                node
+            }
         }
     }
     pub fn parse_let(&mut self) -> Node<Statement> {
@@ -205,8 +224,7 @@ where
         if mutable {
             self.iter.next();
         }
-        let next = try_peek_or_error!(parser: self, expect: Identifier, error: Parameter::Error);
-        assert_equal_variant!(next == Identifier, error: Parameter::Error);
+        try_peek_or_error!(parser: self, expect: Identifier, error: Parameter::Error);
         let identifier = self.parse_operand();
 
         Self::node(
@@ -220,8 +238,14 @@ where
     pub fn parse_assignment(&mut self) -> Node<Statement> {
         let left = self.parse_expression();
         let Some(operand) = self.iter.peek() else {
-            let Node { position, value } = left;
-            return Self::node(Statement::Expression(value), position);
+            let position = Position { ..left.position };
+            let semicolon = try_peek_or_error!(parser: self, error: Statement::Error);
+            assert_equal_variant!(semicolon == Semicolon, error: Statement::Error);
+            self.iter.next().expect("already peeked");
+            return Self::node(
+                Statement::Expression(left),
+                position,
+            );
         };
 
         let variant = match operand.variant {
@@ -231,13 +255,19 @@ where
             TokenVariant::PlusEqual => AssignmentVariant::Addition,
             TokenVariant::SlashEqual => AssignmentVariant::Division,
             _ => {
-                let Node { position, value } = left;
-                return Self::node(Statement::Expression(value), position);
+                let position = Position { ..left.position };
+                let semicolon = try_peek_or_error!(parser: self, error: Statement::Error);
+                assert_equal_variant!(semicolon == Semicolon, error: Statement::Error);
+                self.iter.next().expect("already peeked");
+                return Self::node(Statement::Expression(left), position);
             }
         };
         let position = Position { ..left.position };
         self.iter.next().expect("already peeked");
-        let right = self.parse_equality();
+        let right = self.parse_expression();
+        let semicolon = try_peek_or_error!(parser: self, error: Statement::Error);
+        assert_equal_variant!(semicolon == Semicolon, error: Statement::Error);
+        self.iter.next().expect("already peeked");
         Self::node(
             Statement::Assignment {
                 left: Box::new(left),
@@ -338,7 +368,7 @@ where
     }
     fn parse_operand(&mut self) -> Node<Expression> {
         let token = self.iter.peek().unwrap();
-        match token.variant {
+        match &token.variant {
             TokenVariant::Identifier => {
                 let token = self.iter.next().unwrap();
                 let value = self.text[token.index..token.index + token.length].to_owned();
@@ -358,7 +388,11 @@ where
                     .unwrap();
                 Self::node(Expression::Float(*value), (&token).into())
             }
-            _ => todo!("unrecognized operand"),
+            op => {
+                let value = format!("unexpected operand {op:#?}");
+                let token = self.iter.next().unwrap();
+                Self::node(Expression::Identifier(value), (&token).into())
+            }
         }
     }
     fn node<T>(value: T, position: Position) -> Node<T> {
@@ -550,17 +584,17 @@ mod tests {
             iter: lexer.into_iter().peekable(),
             text: input.clone(),
         };
-        let expression = parser.parse_statement();
+        let expression = parser.parse_statements();
         assert_eq!(
             expression,
-            Node {
+            vec![Node {
                 position: Position {
                     index: 0,
                     column: 1,
                     line: 1,
                 },
                 value: Statement::Return(None),
-            }
+            }]
         )
     }
 
@@ -572,10 +606,10 @@ mod tests {
             iter: lexer.into_iter().peekable(),
             text: input.clone(),
         };
-        let expression = parser.parse_statement();
+        let expression = parser.parse_statements();
         assert_eq!(
             expression,
-            Node {
+            vec![Node {
                 position: Position {
                     index: 0,
                     column: 1,
@@ -607,7 +641,7 @@ mod tests {
                         column: 8,
                     },
                 })))
-            }
+            }]
         )
     }
 
@@ -619,10 +653,10 @@ mod tests {
             iter: lexer.into_iter().peekable(),
             text: input.clone(),
         };
-        let expression = parser.parse_statement();
+        let expression = parser.parse_statements();
         assert_eq!(
             expression,
-            Node {
+            vec![Node {
                 value: Statement::Let {
                     mutable: false,
                     identifier: Box::new(Node {
@@ -647,7 +681,7 @@ mod tests {
                     line: 1,
                     column: 1
                 }
-            }
+            }]
         )
     }
 
@@ -659,10 +693,10 @@ mod tests {
             iter: lexer.into_iter().peekable(),
             text: input.clone(),
         };
-        let expression = parser.parse_statement();
+        let expression = parser.parse_statements();
         assert_eq!(
             expression,
-            Node {
+            vec![Node {
                 value: Statement::Let {
                     mutable: true,
                     identifier: Box::new(Node {
@@ -687,7 +721,7 @@ mod tests {
                     line: 1,
                     column: 1
                 }
-            }
+            }]
         )
     }
 
@@ -729,21 +763,145 @@ mod tests {
     }
 
     #[test]
-    fn let_non_identifier() {
-        let input = String::from("let mut 5 = 9;");
+    fn assign() {
+        let input = String::from("a += 5;");
         let lexer = Lexer::new(input.chars());
         let mut parser = Parser::new(lexer.into_iter(), input.clone());
-        let expression = parser.parse_statement();
+        let expression = parser.parse_statements();
         assert_eq!(
             expression,
-            Node {
-                value: Statement::Error("expected 'Identifier', got 'Integer'".to_string()),
+            vec![Node {
+                value: Statement::Assignment {
+                    left: Box::new(Node {
+                        value: Expression::Identifier("a".to_string()),
+                        position: Position {
+                            index: 0,
+                            line: 1,
+                            column: 1,
+                        },
+                    }),
+                    right: Box::new(Node {
+                        value: Expression::Integer(5),
+                        position: Position {
+                            index: 5,
+                            line: 1,
+                            column: 6,
+                        },
+                    }),
+                    variant: AssignmentVariant::Addition,
+                },
                 position: Position {
-                    index: 8,
+                    index: 0,
                     line: 1,
-                    column: 9
+                    column: 1
                 }
-            }
+            }]
+        );
+    }
+
+    #[test]
+    fn let_chain() {
+        let input = String::from("let mut a = 5; a += 5; a;");
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser::new(lexer.into_iter(), input.clone());
+        let statements = parser.parse_statements();
+        assert_eq!(
+            statements,
+            vec![
+                Node {
+                    value: Statement::Let {
+                        mutable: true,
+                        identifier: Box::new(Node {
+                            value: Expression::Identifier("a".to_string()),
+                            position: Position {
+                                index: 8,
+                                line: 1,
+                                column: 9
+                            }
+                        }),
+                        value: Box::new(Node {
+                            value: Expression::Integer(5),
+                            position: Position {
+                                index: 12,
+                                line: 1,
+                                column: 13
+                            }
+                        }),
+                    },
+                    position: Position {
+                        index: 0,
+                        line: 1,
+                        column: 1
+                    }
+                },
+                Node {
+                    value: Statement::Assignment {
+                        left: Box::new(Node {
+                            value: Expression::Identifier("a".to_string()),
+                            position: Position {
+                                index: 15,
+                                line: 1,
+                                column: 16
+                            }
+                        }),
+                        right: Box::new(Node {
+                            value: Expression::Integer(5),
+                            position: Position {
+                                index: 20,
+                                line: 1,
+                                column: 21
+                            }
+                        }),
+                        variant: AssignmentVariant::Addition,
+                    },
+                    position: Position {
+                        index: 15,
+                        line: 1,
+                        column: 16
+                    }
+                },
+                Node {
+                    value: Statement::Expression(Node {
+                        value: Expression::Identifier("a".to_string()),
+                        position: Position {
+                            index: 23,
+                            line: 1,
+                            column: 24
+                        }
+                    }),
+                    position: Position {
+                        index: 23,
+                        line: 1,
+                        column: 24
+                    }
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn expression_statement() {
+        let input = String::from("a;");
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser::new(lexer.into_iter(), input.clone());
+        let expression = parser.parse_statements();
+        assert_eq!(
+            expression,
+            vec![Node {
+                value: Statement::Expression(Node {
+                    value: Expression::Identifier("a".to_string()),
+                    position: Position {
+                        line: 1,
+                        column: 1,
+                        index: 0,
+                    }
+                }),
+                position: Position {
+                    line: 1,
+                    column: 1,
+                    index: 0,
+                }
+            }]
         );
     }
 }
