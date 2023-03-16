@@ -119,7 +119,7 @@ where
     }
 
     fn make_comment_or_slash(&mut self) -> Option<Token> {
-        self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
+        let single_token = self.make_single_token(TokenVariant::Slash);
         match self.iter.peek() {
             Some(IndexedChar { value: '*', .. }) => {
                 self.iter.next();
@@ -144,11 +144,17 @@ where
                 }
                 self.iter.next();
             },
-            Some(_) | None => Some(self.make_single_or_double_token(
-                TokenVariant::Slash,
-                '=',
-                TokenVariant::SlashEqual,
-            )),
+            Some(IndexedChar { value: '=', .. }) => {
+                self.iter.next();
+                Some(Token {
+                    index: single_token.index,
+                    column: single_token.column,
+                    line: single_token.line,
+                    length: 2,
+                    variant: TokenVariant::SlashEqual,
+                })
+            }
+            Some(_) | None => Some(single_token),
         }
     }
 
@@ -428,6 +434,74 @@ mod tests {
             factory.skip(" "),
             factory.make("10", TokenVariant::Integer),
             factory.make(";", TokenVariant::Semicolon),
+        ]
+        .into_iter()
+        .filter_map(|option| option)
+        .collect();
+
+        assert_eq!(lexer.into_iter().collect::<Vec<Token>>(), tokens);
+    }
+
+    #[test]
+    fn all_tokens() {
+        let input =
+            String::from("let mut fn return a ( ) { } = += + -= - *= * /= / ; 100 100.0 ! != == Å");
+
+        let lexer = Lexer::new(input.chars());
+        let mut factory = TokenFactory::new();
+
+        use TokenVariant::*;
+
+        let tokens: Vec<Token> = vec![
+            factory.make("let", LetKeyword),
+            factory.skip(" "),
+            factory.make("mut", MutKeyword),
+            factory.skip(" "),
+            factory.make("fn", FnKeyword),
+            factory.skip(" "),
+            factory.make("return", ReturnKeyword),
+            factory.skip(" "),
+            factory.make("a", Identifier),
+            factory.skip(" "),
+            factory.make("(", LParenthesis),
+            factory.skip(" "),
+            factory.make(")", RParenthesis),
+            factory.skip(" "),
+            factory.make("{", LBrace),
+            factory.skip(" "),
+            factory.make("}", RBrace),
+            factory.skip(" "),
+            factory.make("=", Equal),
+            factory.skip(" "),
+            factory.make("+=", PlusEqual),
+            factory.skip(" "),
+            factory.make("+", Plus),
+            factory.skip(" "),
+            factory.make("-=", MinusEqual),
+            factory.skip(" "),
+            factory.make("-", Minus),
+            factory.skip(" "),
+            factory.make("*=", AsteriskEqual),
+            factory.skip(" "),
+            factory.make("*", Asterisk),
+            factory.skip(" "),
+            factory.make("/=", SlashEqual),
+            factory.skip(" "),
+            factory.make("/", Slash),
+            factory.skip(" "),
+            factory.make(";", Semicolon),
+            factory.skip(" "),
+            factory.make("100", Integer),
+            factory.skip(" "),
+            factory.make("100.0", Float),
+            factory.skip(" "),
+            factory.make("!", Exclamation),
+            factory.skip(" "),
+            factory.make("!=", ExclamationEqual),
+            factory.skip(" "),
+            factory.make("==", DoubleEqual),
+            factory.skip(" "),
+            factory.make("Å", Error),
         ]
         .into_iter()
         .filter_map(|option| option)
