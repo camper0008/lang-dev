@@ -41,6 +41,9 @@ pub enum TokenVariant {
     Integer,
     Float,
     Error,
+    Exclamation,
+    ExclamationEqual,
+    DoubleEqual,
 }
 
 pub struct Lexer<I: Iterator<Item = char>> {
@@ -177,7 +180,7 @@ where
                 index,
                 column,
                 line,
-                length: 2,
+                length: 1,
                 variant: single_variant,
             },
         }
@@ -258,7 +261,11 @@ where
                 self.iter.next();
                 self.make_token()?
             }
-            '=' => self.make_single_token(TokenVariant::Equal),
+            '=' => self.make_single_or_double_token(
+                TokenVariant::Equal,
+                '=',
+                TokenVariant::DoubleEqual,
+            ),
             ';' => self.make_single_token(TokenVariant::Semicolon),
             '(' => self.make_single_token(TokenVariant::LParenthesis),
             ')' => self.make_single_token(TokenVariant::RParenthesis),
@@ -267,6 +274,11 @@ where
             '-' => {
                 self.make_single_or_double_token(TokenVariant::Minus, '=', TokenVariant::MinusEqual)
             }
+            '!' => self.make_single_or_double_token(
+                TokenVariant::Exclamation,
+                '=',
+                TokenVariant::ExclamationEqual,
+            ),
             '*' => self.make_single_or_double_token(
                 TokenVariant::Asterisk,
                 '=',

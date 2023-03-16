@@ -20,15 +20,42 @@ pub enum Expression {
         right: Box<Node<Expression>>,
         variant: BinaryVariant,
     },
+    Assignment {
+        left: Box<Node<Expression>>,
+        right: Box<Node<Expression>>,
+        variant: AssignmentVariant,
+    },
+    Parameter {
+        mutable: bool,
+        identifier: Box<Node<Expression>>,
+    },
+    Return(Option<Box<Node<Expression>>>),
+    Let {
+        mutable: bool,
+        identifier: Box<Node<Expression>>,
+        value: Box<Node<Expression>>,
+    },
 }
 
 #[derive(Debug, PartialEq)]
 pub enum UnaryVariant {
-    Negate,
+    NegateNumber,
+    NegateBool,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum BinaryVariant {
+    Addition,
+    Subtraction,
+    Multiplication,
+    Division,
+    Equal,
+    NotEqual,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AssignmentVariant {
+    Base,
     Addition,
     Subtraction,
     Multiplication,
@@ -70,8 +97,175 @@ impl<I> Parser<I>
 where
     I: Iterator<Item = Token>,
 {
+    pub fn parse_statement(&mut self) -> Node<Expression> {
+        let Some(keyword) = self.iter.peek() else {
+            todo!("EOF handling");
+        };
+        match &keyword.variant {
+            TokenVariant::ReturnKeyword => self.parse_return(),
+            TokenVariant::LetKeyword => self.parse_let(),
+            variant => todo!("unexpected variant {variant:#?}"),
+        }
+    }
+    pub fn parse_return(&mut self) -> Node<Expression> {
+        let keyword = self
+            .iter
+            .next()
+            .expect("parse return got called out of order");
+        debug_assert_eq!(
+            keyword.variant,
+            TokenVariant::ReturnKeyword,
+            "parse return got called out of order"
+        );
+        let position: Position = (&keyword).into();
+        let token = self.iter.peek().expect("missing semicolon"); // TODO: pretty errors, not
+                                                                  // expect
+        match token.variant {
+            TokenVariant::Semicolon => Self::node(Expression::Return(None), position),
+            _ => Self::node(
+                Expression::Return(Some(Box::new(self.parse_expression()))),
+                position,
+            ),
+        }
+    }
+    pub fn parse_let(&mut self) -> Node<Expression> {
+        let keyword = self.iter.peek().expect("called out of order");
+        debug_assert_eq!(
+            keyword.variant,
+            TokenVariant::LetKeyword,
+            "called out of order"
+        );
+
+        let position = Position {
+            index: keyword.index,
+            line: keyword.line,
+            column: keyword.column,
+        };
+
+        self.iter.next();
+
+        let parameter = self.parse_parameter();
+
+        let (mutable, identifier) = match parameter.value {
+            Expression::Parameter {
+                mutable,
+                identifier,
+            } => (mutable, identifier),
+            expression => panic!("expected parameter, got {expression:#?}"),
+        };
+
+        // TODO: pretty error, not panic
+        let next = self.iter.peek().expect("did not expect EOF");
+
+        if !matches!(next.variant, TokenVariant::Equal) {
+            // TODO: pretty error, not panic
+            panic!("expected 'Equal', got {:#?}", next.variant);
+        }
+
+        self.iter.next();
+
+        self.iter.peek().expect("did not expect EOF"); // TODO: pretty errors, not
+                                                       // expect
+                                                       // expression
+
+        let value = self.parse_expression();
+
+        // TODO: pretty error, not panic
+        let next = self.iter.peek().expect("did not expect EOF");
+
+        if !matches!(next.variant, TokenVariant::Semicolon) {
+            // TODO: pretty error, not panic
+            panic!("expected 'Semicolon', got {:#?}", next.variant);
+        }
+
+        self.iter.next();
+
+        Self::node(
+            Expression::Let {
+                mutable,
+                identifier,
+                value: Box::new(value),
+            },
+            position,
+        )
+    }
+    pub fn parse_parameter(&mut self) -> Node<Expression> {
+        // TODO: pretty error, not expect
+        let next = self.iter.peek().expect("did not expect EOF");
+        let position = Position {
+            index: next.index,
+            line: next.line,
+            column: next.column,
+        };
+        let mutable = next.variant == TokenVariant::MutKeyword;
+        if mutable {
+            self.iter.next();
+        }
+        let identifier = self.parse_operand();
+        if !matches!(identifier.value, Expression::Identifier(_)) {
+            // TODO: pretty errors, not panic
+            panic!("expected identifier, got {:#?}", identifier.value);
+        }
+        Self::node(
+            Expression::Parameter {
+                mutable,
+                identifier: Box::new(identifier),
+            },
+            position,
+        )
+    }
+    pub fn parse_assignment(&mut self) -> Node<Expression> {
+        let left = self.parse_expression();
+        let Some(operand) = self.iter.peek() else {
+            return left;
+        };
+
+        let variant = match operand.variant {
+            TokenVariant::Equal => AssignmentVariant::Base,
+            TokenVariant::AsteriskEqual => AssignmentVariant::Multiplication,
+            TokenVariant::MinusEqual => AssignmentVariant::Subtraction,
+            TokenVariant::PlusEqual => AssignmentVariant::Addition,
+            TokenVariant::SlashEqual => AssignmentVariant::Division,
+            _ => return left,
+        };
+        let position = Position { ..left.position };
+        self.iter.next().unwrap();
+        let right = self.parse_equality();
+        Self::node(
+            Expression::Assignment {
+                left: Box::new(left),
+                right: Box::new(right),
+                variant,
+            },
+            position,
+        )
+    }
+
     pub fn parse_expression(&mut self) -> Node<Expression> {
-        self.parse_add_subtract()
+        self.parse_equality()
+    }
+
+    pub fn parse_equality(&mut self) -> Node<Expression> {
+        let left = self.parse_add_subtract();
+        let Some(operand) = self.iter.peek() else {
+            return left;
+        };
+        let variant = match operand.variant {
+            TokenVariant::DoubleEqual => BinaryVariant::Equal,
+            TokenVariant::ExclamationEqual => BinaryVariant::NotEqual,
+            _ => return left,
+        };
+        let position = Position { ..left.position };
+        self.iter.next().unwrap();
+        let right = self.parse_equality();
+        return Self::node(
+            Expression::Binary {
+                left: Box::new(left),
+                right: Box::new(right),
+                variant,
+            },
+            position,
+        );
     }
 
     fn parse_add_subtract(&mut self) -> Node<Expression> {
@@ -79,87 +273,70 @@ where
         let Some(operand) = self.iter.peek() else {
             return left;
         };
-        if operand.variant == TokenVariant::Plus {
-            let position = Position { ..left.position };
-            self.iter.next().unwrap();
-            let right = self.parse_add_subtract();
-            return Self::node(
-                Expression::Binary {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                    variant: BinaryVariant::Addition,
-                },
-                position,
-            );
-        } else if operand.variant == TokenVariant::Minus {
-            let position = Position { ..left.position };
-            self.iter.next().unwrap();
-            let right = self.parse_add_subtract();
-            return Self::node(
-                Expression::Binary {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                    variant: BinaryVariant::Subtraction,
-                },
-                position,
-            );
-        } else {
-            left
-        }
+        let variant = match operand.variant {
+            TokenVariant::Plus => BinaryVariant::Addition,
+            TokenVariant::Minus => BinaryVariant::Subtraction,
+            _ => return left,
+        };
+        let position = Position { ..left.position };
+        self.iter.next().unwrap();
+        let right = self.parse_add_subtract();
+        return Self::node(
+            Expression::Binary {
+                left: Box::new(left),
+                right: Box::new(right),
+                variant,
+            },
+            position,
+        );
     }
     fn parse_multiply_divide(&mut self) -> Node<Expression> {
         let left = self.parse_unary();
         let Some(operand) = self.iter.peek() else {
             return left;
         };
-        if operand.variant == TokenVariant::Asterisk {
-            let position = Position { ..left.position };
-            self.iter.next().unwrap();
-            let right = self.parse_multiply_divide();
-            return Self::node(
-                Expression::Binary {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                    variant: BinaryVariant::Multiplication,
-                },
-                position,
-            );
-        } else if operand.variant == TokenVariant::Slash {
-            let position = Position { ..left.position };
-            self.iter.next().unwrap();
-            let right = self.parse_multiply_divide();
-            return Self::node(
-                Expression::Binary {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                    variant: BinaryVariant::Division,
-                },
-                position,
-            );
-        } else {
-            left
-        }
+        let variant = match operand.variant {
+            TokenVariant::Asterisk => BinaryVariant::Multiplication,
+            TokenVariant::Slash => BinaryVariant::Division,
+            _ => return left,
+        };
+        let position = Position { ..left.position };
+        self.iter.next().unwrap();
+        let right = self.parse_multiply_divide();
+        return Self::node(
+            Expression::Binary {
+                left: Box::new(left),
+                right: Box::new(right),
+                variant,
+            },
+            position,
+        );
     }
     fn parse_unary(&mut self) -> Node<Expression> {
-        let token = self.iter.peek().unwrap();
-        match token.variant {
-            TokenVariant::Minus => {
-                let token = self.iter.next().unwrap();
-                let subject = self.parse_unary();
-                return Self::node(
-                    Expression::Unary {
-                        subject: Box::new(subject),
-                        variant: UnaryVariant::Negate,
-                    },
-                    (&token).into(),
-                );
-            }
-            _ => self.parse_operand(),
-        }
+        let token = self.iter.peek().expect("unexpected EOF");
+        let variant = match token.variant {
+            TokenVariant::Minus => UnaryVariant::NegateNumber,
+            TokenVariant::Exclamation => UnaryVariant::NegateBool,
+            _ => return self.parse_operand(), // TODO: member index call;
+        };
+        let token = self.iter.next().unwrap();
+        let subject = self.parse_unary();
+        Self::node(
+            Expression::Unary {
+                subject: Box::new(subject),
+                variant,
+            },
+            (&token).into(),
+        )
     }
     fn parse_operand(&mut self) -> Node<Expression> {
         let token = self.iter.peek().unwrap();
         match token.variant {
+            TokenVariant::Identifier => {
+                let token = self.iter.next().unwrap();
+                let value = (&self.text[token.index..token.index + token.length]).to_owned();
+                return Self::node(Expression::Identifier(value), (&token).into());
+            }
             TokenVariant::Integer => {
                 let token = self.iter.next().unwrap();
                 let value = &self.text[token.index..token.index + token.length]
@@ -174,7 +351,7 @@ where
                     .unwrap();
                 return Self::node(Expression::Float(*value), (&token).into());
             }
-            _ => todo!(),
+            _ => todo!("unrecognized operand"),
         }
     }
     fn node<T>(value: T, position: Position) -> Node<T> {
@@ -236,7 +413,7 @@ mod tests {
                             column: 2,
                         },
                     }),
-                    variant: UnaryVariant::Negate,
+                    variant: UnaryVariant::NegateNumber,
                 },
             }
         )
@@ -353,6 +530,155 @@ mod tests {
                         }
                     }),
                     variant: BinaryVariant::Addition,
+                }
+            }
+        )
+    }
+
+    #[test]
+    fn parse_return() {
+        let input = String::from("return;");
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser {
+            iter: lexer.into_iter().peekable(),
+            text: input.clone(),
+        };
+        let expression = parser.parse_statement();
+        assert_eq!(
+            expression,
+            Node {
+                position: Position {
+                    index: 0,
+                    column: 1,
+                    line: 1,
+                },
+                value: Expression::Return(None),
+            }
+        )
+    }
+
+    #[test]
+    fn parse_return_expression() {
+        let input = String::from("return a + b;");
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser {
+            iter: lexer.into_iter().peekable(),
+            text: input.clone(),
+        };
+        let expression = parser.parse_statement();
+        assert_eq!(
+            expression,
+            Node {
+                position: Position {
+                    index: 0,
+                    column: 1,
+                    line: 1,
+                },
+                value: Expression::Return(Some(Box::new(Node {
+                    value: Expression::Binary {
+                        left: Box::new(Node {
+                            value: Expression::Identifier("a".to_string()),
+                            position: Position {
+                                index: 7,
+                                line: 1,
+                                column: 8,
+                            },
+                        }),
+                        right: Box::new(Node {
+                            value: Expression::Identifier("b".to_string()),
+                            position: Position {
+                                index: 11,
+                                line: 1,
+                                column: 12,
+                            },
+                        }),
+                        variant: BinaryVariant::Addition,
+                    },
+                    position: Position {
+                        index: 7,
+                        line: 1,
+                        column: 8,
+                    },
+                })))
+            }
+        )
+    }
+
+    #[test]
+    fn parse_let_expression() {
+        let input = String::from("let a = b;");
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser {
+            iter: lexer.into_iter().peekable(),
+            text: input.clone(),
+        };
+        let expression = parser.parse_statement();
+        assert_eq!(
+            expression,
+            Node {
+                value: Expression::Let {
+                    mutable: false,
+                    identifier: Box::new(Node {
+                        value: Expression::Identifier("a".to_string()),
+                        position: Position {
+                            index: 4,
+                            line: 1,
+                            column: 5,
+                        },
+                    }),
+                    value: Box::new(Node {
+                        value: Expression::Identifier("b".to_string()),
+                        position: Position {
+                            index: 8,
+                            line: 1,
+                            column: 9,
+                        },
+                    }),
+                },
+                position: Position {
+                    index: 0,
+                    line: 1,
+                    column: 1
+                }
+            }
+        )
+    }
+
+    #[test]
+    fn parse_let_mut_expression() {
+        let input = String::from("let mut a = b;");
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser {
+            iter: lexer.into_iter().peekable(),
+            text: input.clone(),
+        };
+        let expression = parser.parse_statement();
+        assert_eq!(
+            expression,
+            Node {
+                value: Expression::Let {
+                    mutable: true,
+                    identifier: Box::new(Node {
+                        value: Expression::Identifier("a".to_string()),
+                        position: Position {
+                            index: 8,
+                            line: 1,
+                            column: 9,
+                        },
+                    }),
+                    value: Box::new(Node {
+                        value: Expression::Identifier("b".to_string()),
+                        position: Position {
+                            index: 12,
+                            line: 1,
+                            column: 13,
+                        },
+                    }),
+                },
+                position: Position {
+                    index: 0,
+                    line: 1,
+                    column: 1
                 }
             }
         )
