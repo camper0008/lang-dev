@@ -8,6 +8,11 @@ pub enum Value {
     Integer(i64),
     Float(f64),
     Bool(bool),
+    Error {
+        message: String,
+        line: usize,
+        column: usize,
+    },
 }
 
 impl Display for Value {
@@ -16,14 +21,12 @@ impl Display for Value {
             Value::Integer(_) => f.write_str("integer"),
             Value::Float(_) => f.write_str("float"),
             Value::Bool(_) => f.write_str("bool"),
+            Value::Error { .. } => f.write_str("error"),
         }
     }
 }
 
 macro_rules! implement_operator {
-    // The `ident` designator is used for variable/function names.
-    // The `tt` (token tree) designator is used for
-    // operators and tokens.
     ($func_trait:ident, $func_name:ident, $op:tt) => {
         impl $func_trait for Value {
             type Output = Result<Value, String>;
