@@ -5,7 +5,7 @@ const NO_MUT_PEEK_NEXT_MESSAGE: &str = "should not mutate between peek & next";
 use std::iter::Peekable;
 
 use indexed_char_iterator::{IndexedChar, IndexedCharIterator};
-use token_variant::TokenVariant;
+pub use token_variant::TokenVariant;
 
 mod token_variant;
 
