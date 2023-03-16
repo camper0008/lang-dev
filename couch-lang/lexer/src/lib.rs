@@ -147,7 +147,7 @@ where
             Some(_) | None => Some(self.make_single_or_double_token(
                 TokenVariant::Slash,
                 '=',
-                TokenVariant::Equal,
+                TokenVariant::SlashEqual,
             )),
         }
     }
