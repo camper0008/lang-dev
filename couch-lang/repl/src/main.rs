@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     env,
     io::{stdin, stdout, BufRead, Write},
 };
@@ -22,11 +21,11 @@ fn main() -> ! {
             println!("tokens -> {tokens:#?}");
         }
         let mut parser = Parser::new(tokens.into_iter(), buf.clone());
-        let ast = parser.parse_expression();
+        let ast = parser.parse_statements();
         if args.contains(&String::from("--ast")) {
             println!("ast -> {ast:#?}");
         }
-        let value = Evaluator::evaluate_expression(ast, &mut HashMap::new());
+        let value = Evaluator::evaluate_statements(ast);
         println!("value -> {value:?}");
     }
 }
