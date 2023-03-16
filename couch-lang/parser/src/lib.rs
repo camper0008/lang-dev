@@ -2,8 +2,35 @@ use std::iter::Peekable;
 
 use couch_lang_lexer::{Token, TokenVariant};
 
+macro_rules! try_peek_or_error {
+    (parser: $self:ident, expect: $expected:ident, error: $error_type:ident::Error) => {{
+        let Some(next) = $self.iter.peek() else {
+                let message = format!("expected '{}', got end of file", stringify!($token_type));
+                let position = Position {
+                        index: $self.text.len(),
+                        line: $self.text.split('\n').count(),
+                        column: $self.text.split('\n').last().unwrap_or("").len(),
+                    };
+                    return Self::node($error_type::Error(message), position);
+                };
+        next
+    }};
+    (parser: $self:ident, error: $error_type:ident::Error) => {{
+        let Some(next) = $self.iter.peek() else {
+                let message = format!("expected token, got end of file");
+                let position = Position {
+                        index: $self.text.len(),
+                        line: $self.text.split('\n').count(),
+                        column: $self.text.split('\n').last().unwrap_or("").len(),
+                    };
+                    return Self::node($error_type::Error(message), position);
+                };
+        next
+    }};
+}
+
 macro_rules! assert_equal_variant {
-    ($token:ident = $should_be_variant:ident | $error_type:ident::Error) => {
+    ($token:ident == $should_be_variant:ident, error: $error_type:ident::Error) => {
         if !matches!(&$token.variant, TokenVariant::$should_be_variant) {
             let message = format!(
                 "expected '{}', got '{}'",
@@ -127,28 +154,25 @@ where
         }
     }
     pub fn parse_statement(&mut self) -> Node<Statement> {
-        let Some(keyword) = self.iter.peek() else {
-            todo!("EOF handling");
-        };
+        let keyword = try_peek_or_error!(parser: self, error: Statement::Error);
         match &keyword.variant {
             TokenVariant::ReturnKeyword => self.parse_return(),
             TokenVariant::LetKeyword => self.parse_let(),
-            variant => todo!("unexpected variant {variant:#?}"),
+            variant => Self::node(
+                Statement::Error(format!("unexpected token {variant:?}")),
+                keyword.into(),
+            ),
         }
     }
     pub fn parse_return(&mut self) -> Node<Statement> {
-        let keyword = self
-            .iter
-            .next()
-            .expect("parse return got called out of order");
+        let keyword = self.iter.next().expect("called out of order");
         debug_assert_eq!(
             keyword.variant,
             TokenVariant::ReturnKeyword,
-            "parse return got called out of order"
+            "called out of order"
         );
         let position: Position = (&keyword).into();
-        let token = self.iter.peek().expect("missing semicolon"); // TODO: pretty errors, not
-                                                                  // expect
+        let token = try_peek_or_error!(parser: self, expect: Semicolon, error: Statement::Error);
         match token.variant {
             TokenVariant::Semicolon => Self::node(Statement::Return(None), position),
             _ => Self::node(
@@ -188,30 +212,16 @@ where
             } => return Self::node(Statement::Error(message), position),
         };
 
-        let Some(next) = self.iter.peek() else {
-            let message = format!("expected 'Equal', got EOF");
-            return Self::node(Statement::Error(message), position);
-        };
+        let next = try_peek_or_error!(parser: self, expect: Equal, error: Statement::Error);
+        assert_equal_variant!(next == Equal, error: Statement::Error);
+        self.iter.next().expect("already peeked");
 
-        assert_equal_variant!(next = Equal | Statement::Error);
-
-        self.iter.next();
-
-        if self.iter.peek().is_none() {
-            let message = format!("expected 'Equal', got EOF");
-            return Self::node(Statement::Error(message), position);
-        };
-
+        try_peek_or_error!(parser: self, error: Statement::Error);
         let value = self.parse_expression();
 
-        let Some(next) = self.iter.peek() else {
-            let message = format!("expected 'Equal', got EOF");
-            return Self::node(Statement::Error(message), position);
-        };
-
-        assert_equal_variant!(next = Semicolon | Statement::Error);
-
-        self.iter.next();
+        let next = try_peek_or_error!(parser: self, expect: Semicolon, error: Statement::Error);
+        assert_equal_variant!(next == Semicolon, error: Statement::Error);
+        self.iter.next().expect("already peeked");
 
         Self::node(
             Statement::Let {
@@ -223,20 +233,7 @@ where
         )
     }
     pub fn parse_parameter(&mut self) -> Node<Parameter> {
-        let next = match self.iter.peek() {
-            Some(next) => next,
-            None => {
-                let message = "expected parameter, got nothing".to_string();
-                return Self::node(
-                    Parameter::Error(message),
-                    Position {
-                        index: self.text.len(),
-                        line: self.text.split('\n').count(),
-                        column: self.text.split('\n').last().or(Some("")).unwrap().len(),
-                    },
-                );
-            }
-        };
+        let next = try_peek_or_error!(parser: self, error: Parameter::Error);
 
         let position = Position {
             index: next.index,
@@ -247,7 +244,7 @@ where
         if mutable {
             self.iter.next();
         } else {
-            assert_equal_variant!(next = Identifier | Parameter::Error);
+            assert_equal_variant!(next == Identifier, error: Parameter::Error);
         }
         let identifier = self.parse_operand();
 
@@ -274,7 +271,7 @@ where
             _ => return left,
         };
         let position = Position { ..left.position };
-        self.iter.next().unwrap();
+        self.iter.next().expect("already peeked");
         let right = self.parse_equality();
         Self::node(
             Expression::Assignment {
@@ -301,7 +298,7 @@ where
             _ => return left,
         };
         let position = Position { ..left.position };
-        self.iter.next().unwrap();
+        self.iter.next().expect("already peeked");
         let right = self.parse_equality();
         Self::node(
             Expression::Binary {
@@ -358,7 +355,7 @@ where
         )
     }
     fn parse_unary(&mut self) -> Node<Expression> {
-        let token = self.iter.peek().expect("unexpected EOF");
+        let token = try_peek_or_error!(parser: self, error: Expression::Error);
         let variant = match token.variant {
             TokenVariant::Minus => UnaryVariant::NegateNumber,
             TokenVariant::Exclamation => UnaryVariant::NegateBool,
