@@ -289,7 +289,17 @@ where
             }
             'a'..='z' | 'A'..='Z' | '_' => self.make_keyword_or_identifier(),
             '/' => self.make_comment_or_slash()?,
-            c => panic!("unrecognized character {c}"),
+            _ => {
+                let token = Token {
+                    variant: TokenVariant::Error,
+                    index: char.index,
+                    length: char.value.len_utf8(),
+                    line: char.line,
+                    column: char.column,
+                };
+                self.iter.next().expect(NO_MUT_PEEK_NEXT_MESSAGE);
+                token
+            }
         };
         Some(token)
     }
