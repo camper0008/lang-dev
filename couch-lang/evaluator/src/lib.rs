@@ -18,7 +18,7 @@ use value::Value;
 pub struct Evaluator {}
 
 impl Evaluator {
-    fn evaluate_statements(statements: Vec<Node<Statement>>) -> Option<Value> {
+    pub fn evaluate_statements(statements: Vec<Node<Statement>>) -> Option<Value> {
         let mut outer_context = HashMap::new();
         let mut inner_context = HashMap::new();
         statements.into_iter().find_map(|statement| {
