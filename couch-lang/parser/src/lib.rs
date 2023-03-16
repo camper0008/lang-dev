@@ -264,14 +264,14 @@ where
         let position = Position { ..left.position };
         self.iter.next().unwrap();
         let right = self.parse_equality();
-        return Self::node(
+        Self::node(
             Expression::Binary {
                 left: Box::new(left),
                 right: Box::new(right),
                 variant,
             },
             position,
-        );
+        )
     }
 
     fn parse_add_subtract(&mut self) -> Node<Expression> {
@@ -287,14 +287,14 @@ where
         let position = Position { ..left.position };
         self.iter.next().unwrap();
         let right = self.parse_add_subtract();
-        return Self::node(
+        Self::node(
             Expression::Binary {
                 left: Box::new(left),
                 right: Box::new(right),
                 variant,
             },
             position,
-        );
+        )
     }
     fn parse_multiply_divide(&mut self) -> Node<Expression> {
         let left = self.parse_unary();
@@ -309,14 +309,14 @@ where
         let position = Position { ..left.position };
         self.iter.next().unwrap();
         let right = self.parse_multiply_divide();
-        return Self::node(
+        Self::node(
             Expression::Binary {
                 left: Box::new(left),
                 right: Box::new(right),
                 variant,
             },
             position,
-        );
+        )
     }
     fn parse_unary(&mut self) -> Node<Expression> {
         let token = self.iter.peek().expect("unexpected EOF");
@@ -340,22 +340,22 @@ where
         match token.variant {
             TokenVariant::Identifier => {
                 let token = self.iter.next().unwrap();
-                let value = (&self.text[token.index..token.index + token.length]).to_owned();
-                return Self::node(Expression::Identifier(value), (&token).into());
+                let value = self.text[token.index..token.index + token.length].to_owned();
+                Self::node(Expression::Identifier(value), (&token).into())
             }
             TokenVariant::Integer => {
                 let token = self.iter.next().unwrap();
                 let value = &self.text[token.index..token.index + token.length]
                     .parse::<i64>()
                     .unwrap();
-                return Self::node(Expression::Integer(*value), (&token).into());
+                Self::node(Expression::Integer(*value), (&token).into())
             }
             TokenVariant::Float => {
                 let token = self.iter.next().unwrap();
                 let value = &self.text[token.index..token.index + token.length]
                     .parse::<f64>()
                     .unwrap();
-                return Self::node(Expression::Float(*value), (&token).into());
+                Self::node(Expression::Float(*value), (&token).into())
             }
             _ => todo!("unrecognized operand"),
         }

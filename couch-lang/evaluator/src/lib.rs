@@ -3,7 +3,7 @@ use std::{
     ops::{Add, Div, Mul, Sub},
 };
 
-enum IdentifierType {
+pub enum IdentifierType {
     Value {
         mutable: bool,
         value: Node<Expression>,
@@ -21,7 +21,7 @@ use value::Value;
 pub struct Evaluator {}
 
 impl Evaluator {
-    fn evaluate_expression(
+    pub fn evaluate_expression(
         expression: Node<Expression>,
         parent_context: &mut HashMap<String, IdentifierType>,
     ) -> Value {
@@ -65,10 +65,13 @@ impl Evaluator {
                 ),
                 BinaryVariant::NotEqual => Value::Bool(
                     Self::evaluate_expression(*left, parent_context)
-                        == Self::evaluate_expression(*right, parent_context),
+                        != Self::evaluate_expression(*right, parent_context),
                 ),
             },
-            Expression::Call { subject, arguments } => todo!(),
+            Expression::Call {
+                subject: _,
+                arguments: _,
+            } => todo!(),
             Expression::Identifier(q) => match parent_context
                 .get(&q)
                 .expect("identifier {q} is not initialized")
@@ -76,7 +79,7 @@ impl Evaluator {
                 IdentifierType::Value { value, .. } => {
                     Self::evaluate_expression(value.clone(), parent_context)
                 }
-                _ => todo!(),
+                IdentifierType::Function { value: _ } => todo!(),
             },
             Expression::Assignment {
                 left,
