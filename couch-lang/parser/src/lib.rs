@@ -2,6 +2,19 @@ use std::iter::Peekable;
 
 use couch_lang_lexer::{Token, TokenVariant};
 
+macro_rules! assert_equal_variant {
+    ($token:ident = $should_be_variant:ident | $error_type:ident::Error) => {
+        if !matches!(&$token.variant, TokenVariant::$should_be_variant) {
+            let message = format!(
+                "expected '{}', got '{}'",
+                stringify!($should_be_variant),
+                stringify!($token.variant),
+            );
+            return Self::node($error_type::Error(message), $token.into());
+        }
+    };
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Statement {
     Let {
@@ -10,11 +23,15 @@ pub enum Statement {
         value: Box<Node<Expression>>,
     },
     Return(Option<Box<Node<Expression>>>),
+    Error(String),
 }
 
-pub struct Parameter {
-    mutable: bool,
-    identifier: Box<Node<Expression>>,
+pub enum Parameter {
+    Item {
+        mutable: bool,
+        identifier: Box<Node<Expression>>,
+    },
+    Error(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -40,6 +57,7 @@ pub enum Expression {
         right: Box<Node<Expression>>,
         variant: AssignmentVariant,
     },
+    Error(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -155,34 +173,43 @@ where
 
         self.iter.next();
 
-        let Parameter {
-            mutable,
-            identifier,
-        } = self.parse_parameter().value;
+        let (mutable, identifier) = match self.parse_parameter() {
+            Node {
+                value:
+                    Parameter::Item {
+                        mutable,
+                        identifier,
+                    },
+                ..
+            } => (mutable, identifier),
+            Node {
+                value: Parameter::Error(message),
+                position,
+            } => return Self::node(Statement::Error(message), position),
+        };
 
-        // TODO: pretty error, not panic
-        let next = self.iter.peek().expect("did not expect EOF");
+        let Some(next) = self.iter.peek() else {
+            let message = format!("expected 'Equal', got EOF");
+            return Self::node(Statement::Error(message), position);
+        };
 
-        if !matches!(next.variant, TokenVariant::Equal) {
-            // TODO: pretty error, not panic
-            panic!("expected 'Equal', got {:#?}", next.variant);
-        }
+        assert_equal_variant!(next = Equal | Statement::Error);
 
         self.iter.next();
 
-        self.iter.peek().expect("did not expect EOF"); // TODO: pretty errors, not
-                                                       // expect
-                                                       // expression
+        if self.iter.peek().is_none() {
+            let message = format!("expected 'Equal', got EOF");
+            return Self::node(Statement::Error(message), position);
+        };
 
         let value = self.parse_expression();
 
-        // TODO: pretty error, not panic
-        let next = self.iter.peek().expect("did not expect EOF");
+        let Some(next) = self.iter.peek() else {
+            let message = format!("expected 'Equal', got EOF");
+            return Self::node(Statement::Error(message), position);
+        };
 
-        if !matches!(next.variant, TokenVariant::Semicolon) {
-            // TODO: pretty error, not panic
-            panic!("expected 'Semicolon', got {:#?}", next.variant);
-        }
+        assert_equal_variant!(next = Semicolon | Statement::Error);
 
         self.iter.next();
 
@@ -196,8 +223,21 @@ where
         )
     }
     pub fn parse_parameter(&mut self) -> Node<Parameter> {
-        // TODO: pretty error, not expect
-        let next = self.iter.peek().expect("did not expect EOF");
+        let next = match self.iter.peek() {
+            Some(next) => next,
+            None => {
+                let message = "expected parameter, got nothing".to_string();
+                return Self::node(
+                    Parameter::Error(message),
+                    Position {
+                        index: self.text.len(),
+                        line: self.text.split('\n').count(),
+                        column: self.text.split('\n').last().or(Some("")).unwrap().len(),
+                    },
+                );
+            }
+        };
+
         let position = Position {
             index: next.index,
             line: next.line,
@@ -206,14 +246,13 @@ where
         let mutable = next.variant == TokenVariant::MutKeyword;
         if mutable {
             self.iter.next();
+        } else {
+            assert_equal_variant!(next = Identifier | Parameter::Error);
         }
         let identifier = self.parse_operand();
-        if !matches!(identifier.value, Expression::Identifier(_)) {
-            // TODO: pretty errors, not panic
-            panic!("expected identifier, got {:#?}", identifier.value);
-        }
+
         Self::node(
-            Parameter {
+            Parameter::Item {
                 mutable,
                 identifier: Box::new(identifier),
             },
