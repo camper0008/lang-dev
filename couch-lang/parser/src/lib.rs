@@ -2,45 +2,7 @@ use std::iter::Peekable;
 
 use couch_lang_lexer::{Token, TokenVariant};
 
-macro_rules! try_peek_or_error {
-    (parser: $self:ident, expect: $expected:ident, error: $error_type:ident::Error) => {{
-        let Some(next) = $self.iter.peek() else {
-                let message = format!("expected '{}', got end of file", stringify!($token_type));
-                let position = Position {
-                        index: $self.text.len(),
-                        line: $self.text.split('\n').count(),
-                        column: $self.text.split('\n').last().unwrap_or("").len(),
-                    };
-                    return Self::node($error_type::Error(message), position);
-                };
-        next
-    }};
-    (parser: $self:ident, error: $error_type:ident::Error) => {{
-        let Some(next) = $self.iter.peek() else {
-                let message = format!("expected token, got end of file");
-                let position = Position {
-                        index: $self.text.len(),
-                        line: $self.text.split('\n').count(),
-                        column: $self.text.split('\n').last().unwrap_or("").len(),
-                    };
-                    return Self::node($error_type::Error(message), position);
-                };
-        next
-    }};
-}
-
-macro_rules! assert_equal_variant {
-    ($token:ident == $should_be_variant:ident, error: $error_type:ident::Error) => {
-        if !matches!(&$token.variant, TokenVariant::$should_be_variant) {
-            let message = format!(
-                "expected '{}', got '{}'",
-                stringify!($should_be_variant),
-                stringify!($token.variant),
-            );
-            return Self::node($error_type::Error(message), $token.into());
-        }
-    };
-}
+mod error_helper;
 
 #[derive(Debug, PartialEq)]
 pub enum Statement {
@@ -50,6 +12,12 @@ pub enum Statement {
         value: Box<Node<Expression>>,
     },
     Return(Option<Box<Node<Expression>>>),
+    Assignment {
+        left: Box<Node<Expression>>,
+        right: Box<Node<Expression>>,
+        variant: AssignmentVariant,
+    },
+    Expression(Expression),
     Error(String),
 }
 
@@ -78,11 +46,6 @@ pub enum Expression {
         left: Box<Node<Expression>>,
         right: Box<Node<Expression>>,
         variant: BinaryVariant,
-    },
-    Assignment {
-        left: Box<Node<Expression>>,
-        right: Box<Node<Expression>>,
-        variant: AssignmentVariant,
     },
     Error(String),
 }
@@ -158,10 +121,8 @@ where
         match &keyword.variant {
             TokenVariant::ReturnKeyword => self.parse_return(),
             TokenVariant::LetKeyword => self.parse_let(),
-            variant => Self::node(
-                Statement::Error(format!("unexpected token {variant:?}")),
-                keyword.into(),
-            ),
+            TokenVariant::FnKeyword => todo!("parse fn"),
+            _ => self.parse_assignment(),
         }
     }
     pub fn parse_return(&mut self) -> Node<Statement> {
@@ -243,9 +204,9 @@ where
         let mutable = next.variant == TokenVariant::MutKeyword;
         if mutable {
             self.iter.next();
-        } else {
-            assert_equal_variant!(next == Identifier, error: Parameter::Error);
         }
+        let next = try_peek_or_error!(parser: self, expect: Identifier, error: Parameter::Error);
+        assert_equal_variant!(next == Identifier, error: Parameter::Error);
         let identifier = self.parse_operand();
 
         Self::node(
@@ -256,10 +217,11 @@ where
             position,
         )
     }
-    pub fn parse_assignment(&mut self) -> Node<Expression> {
+    pub fn parse_assignment(&mut self) -> Node<Statement> {
         let left = self.parse_expression();
         let Some(operand) = self.iter.peek() else {
-            return left;
+            let Node { position, value } = left;
+            return Self::node(Statement::Expression(value), position);
         };
 
         let variant = match operand.variant {
@@ -268,13 +230,16 @@ where
             TokenVariant::MinusEqual => AssignmentVariant::Subtraction,
             TokenVariant::PlusEqual => AssignmentVariant::Addition,
             TokenVariant::SlashEqual => AssignmentVariant::Division,
-            _ => return left,
+            _ => {
+                let Node { position, value } = left;
+                return Self::node(Statement::Expression(value), position);
+            }
         };
         let position = Position { ..left.position };
         self.iter.next().expect("already peeked");
         let right = self.parse_equality();
         Self::node(
-            Expression::Assignment {
+            Statement::Assignment {
                 left: Box::new(left),
                 right: Box::new(right),
                 variant,
@@ -758,6 +723,25 @@ mod tests {
                     index: 0,
                     line: 1,
                     column: 1
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn let_non_identifier() {
+        let input = String::from("let mut 5 = 9;");
+        let lexer = Lexer::new(input.chars());
+        let mut parser = Parser::new(lexer.into_iter(), input.clone());
+        let expression = parser.parse_statement();
+        assert_eq!(
+            expression,
+            Node {
+                value: Statement::Error("expected 'Identifier', got 'Integer'".to_string()),
+                position: Position {
+                    index: 8,
+                    line: 1,
+                    column: 9
                 }
             }
         );
