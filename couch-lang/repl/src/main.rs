@@ -11,12 +11,20 @@ fn eval(code: String, print_tokens: bool, print_ast: bool) {
     let lexer = Lexer::new(code.chars());
     let tokens: Vec<Token> = lexer.into_iter().collect();
     if print_tokens {
-        println!("tokens -> {tokens:#?}");
+        println!("tokens -> [");
+        for token in tokens.iter() {
+            println!(" {}", token.to_fancy_string(&code));
+        }
+        println!("]");
     }
     let mut parser = Parser::new(tokens.into_iter(), code.clone());
     let ast = parser.parse_statements();
     if print_ast {
-        println!("ast -> {ast:#?}");
+        println!("ast -> [");
+        for ast_item in ast.iter() {
+            println!("{:#?}", ast_item);
+        }
+        println!("]");
     }
     let value = Evaluator::evaluate_statements(ast);
     println!("value -> {value:?}");
