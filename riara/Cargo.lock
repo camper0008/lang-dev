@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "riara_isnt_a_recursive_acronym"
+name = "riara"
 version = "0.1.0"

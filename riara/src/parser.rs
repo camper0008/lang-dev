@@ -1,10 +1,9 @@
-use std::str::Chars;
-use crate::pos::{Pos, ErrorType, ErrorCollector, Node};
-use crate::token::{TokenType, Token};
-use crate::lexer::{Lexer};
-use create::parsed::{UnaryType, BinaryType, Expr};
+use crate::lexer::Lexer;
+use crate::parsed::{BinaryType, Expr, UnaryType};
+use crate::pos::{Error, ErrorCollector, ErrorType, Node, Pos};
+use crate::token::{Token, TokenType};
 
-struct Parser<'a> {
+pub struct Parser<'a> {
     text: &'a str,
     lexer: &'a mut Lexer<'a>,
     current: Token,

@@ -2,13 +2,13 @@ use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pos {
-    index: usize,
-    line: usize,
-    col: usize,
+    pub index: usize,
+    pub line: usize,
+    pub col: usize,
 }
 
 #[derive(Debug)]
-enum ErrorType {
+pub enum ErrorType {
     Lexer,
     Parser,
     Runtime,
@@ -16,22 +16,23 @@ enum ErrorType {
 
 impl ErrorType {
     pub fn to_string(&self) -> String {
-        match error.error_type {
+        match self {
             ErrorType::Lexer => "LexerError",
             ErrorType::Parser => "ParserError",
             ErrorType::Runtime => "RuntimeError",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
 #[derive(Debug)]
-struct Error {
-    error_type: ErrorType,
-    pos: Pos,
-    message: String,
+pub struct Error {
+    pub error_type: ErrorType,
+    pub pos: Pos,
+    pub message: String,
 }
 
-struct ErrorCollector {
+pub struct ErrorCollector {
     errors: Vec<Error>,
 }
 
@@ -53,14 +54,14 @@ impl ErrorCollector {
         self
     }
 
-    pub fn errors(mut self) -> Vec<Error> {
+    pub fn errors(self) -> Vec<Error> {
         self.errors
     }
 }
 
-struct Node<T> {
-    value: T,
-    pos: Pos,
+pub struct Node<T> {
+    pub value: T,
+    pub pos: Pos,
 }
 
 impl<T> Node<T> {

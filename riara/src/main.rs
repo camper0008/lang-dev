@@ -1,15 +1,16 @@
+#![allow(dead_code)]
 
-mod pos;
-mod token;
 mod lexer;
 mod parsed;
 mod parser;
+mod pos;
+mod runtime;
+mod token;
 
-#![allow(dead_code)]
-
-use create::pos::{ErrorType, ErrorCollector};
-use create::lexer::{Lexer};
-use create::parser::{Parser};
+use crate::lexer::Lexer;
+use crate::parser::Parser;
+use crate::pos::ErrorCollector;
+use crate::runtime::Evaluator;
 
 fn main() {
     let text = "1 + 2 * -(3 - 4) + 1";
@@ -37,8 +38,9 @@ fn main() {
         }
     }
 
-    println!("Parsed: {expr:#?}");
+    println!("Parsed: {parsed:#?}");
 
-    let result = eval_expr(expr);
+    let mut evaluator = Evaluator::new();
+    let result = evaluator.eval_expr(parsed);
     println!("Value: {result:?}");
 }

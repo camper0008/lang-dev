@@ -1,6 +1,8 @@
+use crate::{
+    pos::{Error, ErrorCollector, ErrorType, Pos},
+    token::{Token, TokenType},
+};
 use std::str::Chars;
-use crate::pos::{Pos, ErrorType, ErrorCollector};
-use crate::token::{TokenType, Token};
 
 pub struct Lexer<'a> {
     chars: Chars<'a>,
@@ -47,9 +49,7 @@ impl<'a> Lexer<'a> {
                 }
             }
             Some('0'..='9') => {
-                println!("before: {:#?}", self.current);
                 self.step();
-                println!("after: {:#?}", self.current);
                 loop {
                     match self.current {
                         Some('0'..='9') => self.step(),
