@@ -6,6 +6,7 @@ mod parser;
 mod pos;
 mod runtime;
 mod token;
+mod utils;
 
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -13,9 +14,10 @@ use crate::pos::ErrorCollector;
 use crate::runtime::Evaluator;
 
 fn main() {
-    let text = "1 + 2 * -(3 - 4) + 1";
+    //let text = "1 + 2 * -(3 - 4) + 1";
+    let text = r#"{ 123; (123, "foobar"), [false, 123] }"#;
 
-    println!("Text: \"{text}\"");
+    println!("Text:\n{text}\n");
 
     let mut lexer_collector = ErrorCollector::new();
     let mut lexer = Lexer::new(text, &mut lexer_collector);
@@ -25,7 +27,8 @@ fn main() {
     let parsed = parser.parse();
 
     let errors = parser_collector.merged_with(lexer_collector).errors();
-    if !errors.is_empty() {
+    let failed = !errors.is_empty();
+    if failed {
         println!("{} error(s) occurred:", errors.len());
         for error in errors {
             println!(
@@ -36,11 +39,25 @@ fn main() {
                 error.pos.col,
             );
         }
+        println!("");
     }
 
-    println!("Parsed: {parsed:#?}");
+    println!("Parsed:\n{parsed:#?}\n");
+
+    if failed {
+        return;
+    }
 
     let mut evaluator = Evaluator::new();
-    let result = evaluator.eval_expr(parsed);
-    println!("Value: {result:?}");
+    let result = evaluator.eval_expr(&parsed);
+    match result {
+        Ok(value) => println!("Value:\n{value:?}"),
+        Err(error) => println!(
+            "{}: {}, at {}:{}",
+            error.error_type.to_string(),
+            error.message,
+            error.pos.line,
+            error.pos.col,
+        ),
+    };
 }

@@ -2,6 +2,7 @@ use crate::lexer::Lexer;
 use crate::parsed::{BinaryType, Expr, UnaryType};
 use crate::pos::{Error, ErrorCollector, ErrorType, Node, Pos};
 use crate::token::{Token, TokenType};
+use crate::utils::unescape_string;
 
 pub struct Parser<'a> {
     text: &'a str,
@@ -31,10 +32,14 @@ impl<'a> Parser<'a> {
             TokenType::Eof => expr,
             tt => {
                 let pos = self.current.pos.clone();
-                self.add_error(pos, format!("expected end, got {tt:#?}"));
+                self.add_error(pos, format!("expected Eof, got {tt:#?}"));
                 expr
             }
         }
+    }
+
+    fn parse_statement(&mut self) -> Node<Expr> {
+        self.parse_expr()
     }
 
     fn parse_expr(&mut self) -> Node<Expr> {
@@ -46,8 +51,8 @@ impl<'a> Parser<'a> {
         loop {
             match self.current.token_type {
                 TokenType::Plus => {
+                    let pos = self.current.pos.clone();
                     self.step();
-                    let pos = left.pos.clone();
                     left = Node::new(
                         Expr::Binary {
                             binary_type: BinaryType::Add,
@@ -58,8 +63,8 @@ impl<'a> Parser<'a> {
                     )
                 }
                 TokenType::Minus => {
+                    let pos = self.current.pos.clone();
                     self.step();
-                    let pos = left.pos.clone();
                     left = Node::new(
                         Expr::Binary {
                             binary_type: BinaryType::Subtract,
@@ -79,8 +84,8 @@ impl<'a> Parser<'a> {
         loop {
             match self.current.token_type {
                 TokenType::Asterisk => {
+                    let pos = self.current.pos.clone();
                     self.step();
-                    let pos = left.pos.clone();
                     left = Node::new(
                         Expr::Binary {
                             binary_type: BinaryType::Multiply,
@@ -91,8 +96,8 @@ impl<'a> Parser<'a> {
                     )
                 }
                 TokenType::Slash => {
+                    let pos = self.current.pos.clone();
                     self.step();
-                    let pos = left.pos.clone();
                     left = Node::new(
                         Expr::Binary {
                             binary_type: BinaryType::Divide,
@@ -135,34 +140,168 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_operand(&mut self) -> Node<Expr> {
+        let pos = self.current.pos.clone();
         match &self.current.token_type {
             TokenType::Int => {
-                let current = self.current.clone();
-                let number = current.value(self.text).parse().unwrap();
+                let number = self.current.value(self.text).parse().unwrap();
                 self.step();
-                Node::new(Expr::Int(number), current.pos)
+                Node::new(Expr::Int(number), pos)
             }
-            TokenType::String => {
-                let current = self.current.clone();
-                let str = String::from(current.value(self.text));
+            TokenType::String => self.parse_string_expr(),
+            TokenType::False => {
                 self.step();
-                Node::new(Expr::String(str), current.pos)
+                Node::new(Expr::Bool(false), pos)
             }
-            TokenType::LParen => {
+            TokenType::True => {
                 self.step();
-                let left = self.parse_expr();
-                match self.current.token_type {
-                    TokenType::RParen => self.step(),
-                    _ => self.add_error(
-                        self.pos(),
-                        "you forgot a closing parenthesis idiot".to_string(),
-                    ),
-                };
-                left
+                Node::new(Expr::Bool(true), pos)
             }
+            TokenType::LParen => self.parse_unit_or_group_or_tuple_expr(),
+            TokenType::LBrace => self.parse_block_expr(),
+            TokenType::LBracket => self.parse_array_expr(),
             token_type => {
                 self.add_error(self.pos(), format!("expected operand, got {token_type:#?}"));
                 Node::new(Expr::Error, self.pos())
+            }
+        }
+    }
+
+    fn parse_string_expr(&mut self) -> Node<Expr> {
+        let pos = self.current.pos.clone();
+        let literal_value = self.current.value(self.text);
+        let unescaped_value = match unescape_string(&literal_value[1..literal_value.len() - 1]) {
+            Ok(value) => value,
+            Err(message) => {
+                self.add_error(pos.clone(), format!("malformed string, {message}"));
+                return Node::new(Expr::Error, pos);
+            }
+        };
+        self.step();
+        Node::new(Expr::String(unescaped_value), pos)
+    }
+
+    fn parse_unit_or_group_or_tuple_expr(&mut self) -> Node<Expr> {
+        let pos = self.current.pos.clone();
+        self.step();
+        let mut exprs = Vec::<Node<Expr>>::new();
+        match self.current.token_type {
+            TokenType::RParen => {
+                self.step();
+                Node::new(Expr::Unit, pos)
+            }
+            _ => {
+                exprs.push(self.parse_expr());
+                loop {
+                    match &self.current.token_type {
+                        TokenType::RParen => {
+                            self.step();
+                            break if exprs.len() == 1 {
+                                exprs.pop().unwrap()
+                            } else {
+                                Node::new(Expr::Tuple(exprs), pos)
+                            };
+                        }
+                        TokenType::Comma => {
+                            self.step();
+                            exprs.push(self.parse_expr());
+                        }
+                        token_type => {
+                            self.add_error(
+                                self.pos(),
+                                format!("expected ',' or ')', got {token_type:?}"),
+                            );
+                            break Node::new(Expr::Error, pos);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn parse_block_expr(&mut self) -> Node<Expr> {
+        let pos = self.current.pos.clone();
+        self.step();
+        let mut statements = Vec::<Node<Expr>>::new();
+        match self.current.token_type {
+            TokenType::RBrace => {
+                self.step();
+                Node::new(
+                    Expr::Block {
+                        statements,
+                        expr: None,
+                    },
+                    pos,
+                )
+            }
+            _ => loop {
+                let requires_semicolon = requires_semicolon(&self.current.token_type);
+                statements.push(self.parse_statement());
+                match &self.current.token_type {
+                    TokenType::RBrace => {
+                        self.step();
+                        let expr = statements.pop().unwrap();
+                        break Node::new(
+                            Expr::Block {
+                                statements,
+                                expr: Some(Box::new(expr)),
+                            },
+                            pos,
+                        );
+                    }
+                    TokenType::Semicolon => loop {
+                        match self.current.token_type {
+                            TokenType::Semicolon => self.step(),
+                            _ => break,
+                        }
+                    },
+                    token_type => {
+                        self.add_error(
+                            self.current.pos.clone(),
+                            format!("expected '}}' or ';', got {token_type:?}"),
+                        );
+                        break Node::new(Expr::Error, pos);
+                    }
+                }
+            },
+        }
+    }
+
+    fn parse_array_expr(&mut self) -> Node<Expr> {
+        let pos = self.current.pos.clone();
+        self.step();
+        let mut exprs = Vec::<Node<Expr>>::new();
+        match self.current.token_type {
+            TokenType::RBracket => {
+                self.step();
+                Node::new(Expr::Array(exprs), pos)
+            }
+            _ => {
+                exprs.push(self.parse_expr());
+                loop {
+                    match &self.current.token_type {
+                        TokenType::RBracket => {
+                            self.step();
+                            break Node::new(Expr::Array(exprs), pos);
+                        }
+                        TokenType::Comma => {
+                            self.step();
+                            match self.current.token_type {
+                                TokenType::RBracket => {
+                                    self.step();
+                                    break Node::new(Expr::Array(exprs), pos);
+                                }
+                                _ => {}
+                            }
+                        }
+                        token_type => {
+                            self.add_error(
+                                self.pos(),
+                                format!("expected ',' or ']', got {token_type:?}"),
+                            );
+                            break Node::new(Expr::Error, pos);
+                        }
+                    }
+                }
             }
         }
     }
@@ -181,5 +320,11 @@ impl<'a> Parser<'a> {
             pos,
             message,
         })
+    }
+}
+
+fn requires_semicolon(token_type: &TokenType) -> bool {
+    match token_type {
+        _ => true,
     }
 }

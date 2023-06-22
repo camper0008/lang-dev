@@ -5,6 +5,7 @@ use crate::{
 use std::str::Chars;
 
 pub struct Lexer<'a> {
+    text: &'a str,
     chars: Chars<'a>,
     current: Option<char>,
     index: usize,
@@ -18,6 +19,7 @@ impl<'a> Lexer<'a> {
         let mut chars = text.chars();
         let current = chars.next();
         Self {
+            text,
             chars,
             current,
             index: 0,
@@ -35,7 +37,16 @@ impl<'a> Lexer<'a> {
                 loop {
                     match self.current {
                         Some('a'..='z' | 'A'..='Z' | '0'..='9' | '_') => self.step(),
-                        _ => break self.token(TokenType::Id, pos),
+                        _ => {
+                            break self.token(
+                                match pos.value(self.text, self.index - pos.index) {
+                                    "false" => TokenType::False,
+                                    "true" => TokenType::True,
+                                    _ => TokenType::Id,
+                                },
+                                pos,
+                            )
+                        }
                     }
                 }
             }
@@ -88,30 +99,20 @@ impl<'a> Lexer<'a> {
                     }
                 }
             }
-            Some('+') => {
-                self.step();
-                self.token(TokenType::Plus, pos)
-            }
-            Some('-') => {
-                self.step();
-                self.token(TokenType::Minus, pos)
-            }
-            Some('*') => {
-                self.step();
-                self.token(TokenType::Asterisk, pos)
-            }
-            Some('/') => {
-                self.step();
-                self.token(TokenType::Slash, pos)
-            }
-            Some('(') => {
-                self.step();
-                self.token(TokenType::LParen, pos)
-            }
-            Some(')') => {
-                self.step();
-                self.token(TokenType::RParen, pos)
-            }
+            Some('(') => self.step_and_token(TokenType::LParen),
+            Some(')') => self.step_and_token(TokenType::RParen),
+            Some('{') => self.step_and_token(TokenType::LBrace),
+            Some('}') => self.step_and_token(TokenType::RBrace),
+            Some('[') => self.step_and_token(TokenType::LBracket),
+            Some(']') => self.step_and_token(TokenType::RBracket),
+            Some('.') => self.step_and_token(TokenType::Dot),
+            Some(',') => self.step_and_token(TokenType::Comma),
+            Some(':') => self.step_and_token(TokenType::Colon),
+            Some(';') => self.step_and_token(TokenType::Semicolon),
+            Some('+') => self.step_and_token(TokenType::Plus),
+            Some('-') => self.step_and_token(TokenType::Minus),
+            Some('*') => self.step_and_token(TokenType::Asterisk),
+            Some('/') => self.step_and_token(TokenType::Slash),
             Some(c) => {
                 self.step();
                 self.add_error(pos.clone(), format!("invalid char '{}'", c));
@@ -119,6 +120,12 @@ impl<'a> Lexer<'a> {
             }
             None => self.token(TokenType::Eof, pos),
         }
+    }
+
+    fn step_and_token(&mut self, token_type: TokenType) -> Token {
+        let pos = self.pos();
+        self.step();
+        self.token(token_type, pos)
     }
 
     fn done(&self) -> bool {

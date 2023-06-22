@@ -7,6 +7,12 @@ pub struct Pos {
     pub col: usize,
 }
 
+impl Pos {
+    pub fn value<'a>(&'a self, text: &'a str, length: usize) -> &str {
+        &text[self.index..self.index + length]
+    }
+}
+
 #[derive(Debug)]
 pub enum ErrorType {
     Lexer,
