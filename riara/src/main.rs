@@ -14,8 +14,7 @@ use crate::pos::ErrorCollector;
 use crate::runtime::Evaluator;
 
 fn main() {
-    //let text = "1 + 2 * -(3 - 4) + 1";
-    let text = r#"{ 123; (123, "foobar"), [false, 123] }"#;
+    let text = r#"{ 123; (123, "foobar",); [false, 123]; -123}"#;
 
     println!("Text:\n{text}\n");
 

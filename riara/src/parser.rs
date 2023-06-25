@@ -183,35 +183,43 @@ impl<'a> Parser<'a> {
     fn parse_unit_or_group_or_tuple_expr(&mut self) -> Node<Expr> {
         let pos = self.current.pos.clone();
         self.step();
-        let mut exprs = Vec::<Node<Expr>>::new();
         match self.current.token_type {
             TokenType::RParen => {
                 self.step();
                 Node::new(Expr::Unit, pos)
             }
             _ => {
-                exprs.push(self.parse_expr());
-                loop {
-                    match &self.current.token_type {
-                        TokenType::RParen => {
+                let first_expr = self.parse_expr();
+                match &self.current.token_type {
+                    TokenType::RParen => {
+                        self.step();
+                        first_expr
+                    }
+                    TokenType::Comma => {
+                        let mut exprs = vec![first_expr];
+                        while self.current.token_type == TokenType::Comma {
                             self.step();
-                            break if exprs.len() == 1 {
-                                exprs.pop().unwrap()
-                            } else {
-                                Node::new(Expr::Tuple(exprs), pos)
-                            };
-                        }
-                        TokenType::Comma => {
-                            self.step();
+                            if self.current.token_type == TokenType::RParen {
+                                break;
+                            }
                             exprs.push(self.parse_expr());
                         }
-                        token_type => {
+                        if self.current.token_type != TokenType::RParen {
                             self.add_error(
                                 self.pos(),
-                                format!("expected ',' or ')', got {token_type:?}"),
+                                format!("expected ')', got {:?}", self.current.token_type),
                             );
-                            break Node::new(Expr::Error, pos);
+                        } else {
+                            self.step();
                         }
+                        Node::new(Expr::Tuple(exprs), pos)
+                    }
+                    token_type => {
+                        self.add_error(
+                            self.pos(),
+                            format!("expected ',' or ')', got {token_type:?}"),
+                        );
+                        Node::new(Expr::Error, pos)
                     }
                 }
             }
@@ -234,7 +242,7 @@ impl<'a> Parser<'a> {
                 )
             }
             _ => loop {
-                let requires_semicolon = requires_semicolon(&self.current.token_type);
+                let _requires_semicolon = requires_semicolon(&self.current.token_type);
                 statements.push(self.parse_statement());
                 match &self.current.token_type {
                     TokenType::RBrace => {
@@ -248,12 +256,31 @@ impl<'a> Parser<'a> {
                             pos,
                         );
                     }
-                    TokenType::Semicolon => loop {
-                        match self.current.token_type {
-                            TokenType::Semicolon => self.step(),
-                            _ => break,
+                    TokenType::Semicolon => {
+                        while self.current.token_type == TokenType::Semicolon {
+                            self.step();
                         }
-                    },
+                        match &self.current.token_type {
+                            TokenType::RBrace => {
+                                self.step();
+                                break Node::new(
+                                    Expr::Block {
+                                        statements,
+                                        expr: None,
+                                    },
+                                    pos,
+                                );
+                            }
+                            token_type @ TokenType::Eof => {
+                                self.add_error(
+                                    self.current.pos.clone(),
+                                    format!("expected '}}', got {token_type:?}"),
+                                );
+                                break Node::new(Expr::Error, pos);
+                            }
+                            _ => {}
+                        }
+                    }
                     token_type => {
                         self.add_error(
                             self.current.pos.clone(),
@@ -293,12 +320,8 @@ impl<'a> Parser<'a> {
                                 _ => {}
                             }
                         }
-                        token_type => {
-                            self.add_error(
-                                self.pos(),
-                                format!("expected ',' or ']', got {token_type:?}"),
-                            );
-                            break Node::new(Expr::Error, pos);
+                        _ => {
+                            exprs.push(self.parse_expr());
                         }
                     }
                 }
