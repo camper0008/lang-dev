@@ -9,6 +9,13 @@ pub enum TokenType {
     String,
     False,
     True,
+    Not,
+    And,
+    Or,
+    In,
+    If,
+    Else,
+    Let,
     LParen,
     RParen,
     LBrace,
@@ -23,6 +30,7 @@ pub enum TokenType {
     Minus,
     Asterisk,
     Slash,
+    Equal,
 }
 
 #[derive(Debug, Clone, PartialEq)]

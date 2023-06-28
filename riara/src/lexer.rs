@@ -42,6 +42,13 @@ impl<'a> Lexer<'a> {
                                 match pos.value(self.text, self.index - pos.index) {
                                     "false" => TokenType::False,
                                     "true" => TokenType::True,
+                                    "not" => TokenType::Not,
+                                    "or" => TokenType::Or,
+                                    "and" => TokenType::And,
+                                    "in" => TokenType::In,
+                                    "if" => TokenType::If,
+                                    "else" => TokenType::Else,
+                                    "let" => TokenType::Let,
                                     _ => TokenType::Id,
                                 },
                                 pos,
@@ -113,6 +120,7 @@ impl<'a> Lexer<'a> {
             Some('-') => self.step_and_token(TokenType::Minus),
             Some('*') => self.step_and_token(TokenType::Asterisk),
             Some('/') => self.step_and_token(TokenType::Slash),
+            Some('=') => self.step_and_token(TokenType::Equal),
             Some(c) => {
                 self.step();
                 self.add_error(pos.clone(), format!("invalid char '{}'", c));

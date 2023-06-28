@@ -14,7 +14,12 @@ use crate::pos::ErrorCollector;
 use crate::runtime::Evaluator;
 
 fn main() {
-    let text = r#"{ 123; (123, "foobar",); [false, 123]; -123}"#;
+    let text = r#"{
+    let a = 4;
+    let b = 5;
+    a + b
+}
+"#;
 
     println!("Text:\n{text}\n");
 
@@ -41,7 +46,7 @@ fn main() {
         println!("");
     }
 
-    println!("Parsed:\n{parsed:#?}\n");
+    // println!("Parsed:\n{parsed:#?}\n");
 
     if failed {
         return;

@@ -4,6 +4,7 @@ use crate::pos::Node;
 pub enum UnaryType {
     Plus,
     Negate,
+    Not,
 }
 
 #[derive(Debug)]
@@ -12,6 +13,10 @@ pub enum BinaryType {
     Subtract,
     Multiply,
     Divide,
+    Or,
+    And,
+    Includes,
+    Excludes,
 }
 
 #[derive(Debug)]
@@ -28,6 +33,19 @@ pub enum Expr {
         statements: Vec<Node<Expr>>,
         expr: Option<Box<Node<Expr>>>,
     },
+    If {
+        condition: Box<Node<Expr>>,
+        truthy: Box<Node<Expr>>,
+        falsy: Option<Box<Node<Expr>>>,
+    },
+    Index {
+        subject: Box<Node<Expr>>,
+        value: Box<Node<Expr>>,
+    },
+    Call {
+        subject: Box<Node<Expr>>,
+        arguments: Vec<Node<Expr>>,
+    },
     Unary {
         unary_type: UnaryType,
         subject: Box<Node<Expr>>,
@@ -36,5 +54,9 @@ pub enum Expr {
         binary_type: BinaryType,
         left: Box<Node<Expr>>,
         right: Box<Node<Expr>>,
+    },
+    Let {
+        id: String,
+        value: Box<Node<Expr>>,
     },
 }
